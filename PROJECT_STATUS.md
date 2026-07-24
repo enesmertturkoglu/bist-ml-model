@@ -29,6 +29,7 @@ Label ve işlem senaryosu tamamlandı. Sıradaki ana aşama veri kaynağı ve hi
 - ChatGPT karar ve proje yönetimi, Codex ise kodlama, test ve GitHub güncellemeleri için kullanılacak şekilde iş bölümü kesinleştirildi.
 - Her kesin karar veya gerekli belge güncellemesi sonrasında sohbetin otomatik olarak kopyalanabilir bir Codex devir talimatı vermesi zorunlu hale getirildi.
 - Codex çalışma kurallarını repo düzeyinde tanımlayan `AGENTS.md` dosyası hazırlandı.
+- Dört güncel yönetim dosyası (`PROJECT_BRIEF.md`, `PROJECT_STATUS.md`, `DECISIONS.md`, `AGENTS.md`) GitHub reposuna yüklendi.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -58,15 +59,14 @@ Label ve işlem senaryosu tamamlandı. Sıradaki ana aşama veri kaynağı ve hi
 
 ## Sıradaki Görevler
 
-1. Dört güncel yönetim dosyasını (`PROJECT_BRIEF.md`, `PROJECT_STATUS.md`, `DECISIONS.md`, `AGENTS.md`) Codex ile GitHub reposuna yüklemek.
-2. Veri kaynağı seçeneklerini değerlendirmek.
-3. İlk sürümde kullanılacak hisse evrenini belirlemek.
-4. Seçilen kaynaktan küçük bir OHLCV örneği indirmek.
-5. Açılış, high, kapanış, işlem görmeme ve düzeltilmiş fiyat alanlarının yeterliliğini kontrol etmek.
-6. Gerçek sütunlara göre `DATA_DICTIONARY.md` oluşturmak.
-7. Label üretim fonksiyonunu örnek veri üzerinde uygulamak ve birim testlerini yazmak.
-8. Veri kullanılabilirliği netleşince `FEATURE_CATALOG.md` oluşturmak.
-9. İlk model deneyi başladığında `EXPERIMENT_LOG.md` oluşturmak.
+1. Veri kaynağı seçeneklerini değerlendirmek.
+2. İlk sürümde kullanılacak hisse evrenini belirlemek.
+3. Seçilen kaynaktan küçük bir OHLCV örneği indirmek.
+4. Açılış, high, kapanış, işlem görmeme ve düzeltilmiş fiyat alanlarının yeterliliğini kontrol etmek.
+5. Gerçek sütunlara göre `DATA_DICTIONARY.md` oluşturmak.
+6. Label üretim fonksiyonunu örnek veri üzerinde uygulamak ve birim testlerini yazmak.
+7. Veri kullanılabilirliği netleşince `FEATURE_CATALOG.md` oluşturmak.
+8. İlk model deneyi başladığında `EXPERIMENT_LOG.md` oluşturmak.
 
 ## Sonraki Ana Aşamalar
 
