@@ -4,9 +4,9 @@
 
 ## Mevcut Aşama
 
-Veri kaynakları, `2020-03-13` tarihsel başlangıcı, standart tavan açılış hesabı, temel `T+1` işlem yapılabilirlik kuralları ve özel işlem durumlarının ilk sürüm yaklaşımı kesinleştirildi.
+Veri kaynakları, `2020-03-13` tarihsel başlangıcı, standart tavan açılış hesabı, temel `T+1` işlem yapılabilirlik kuralları ve özel işlem durumlarının ilk sürüm yaklaşımı kesinleştirildi. Yerel kaynak kabul testi ve yFinance tarihsel fiyat ölçeği deneyi teknik olarak tamamlandı; kaynak kabul sonucu `PARTIAL` olarak ölçüldü. İki kaynağın gerçek sütunları ve nominal ölçek alanları `DATA_DICTIONARY.md` içinde belgelendi.
 
-Sıradaki görev kaynak kabul testinin kapsamını oluşturmak ve gerçek veri sütunlarını doğrulamaktır.
+Genel veri toplama ve temizleme aşaması başlatılmadı. Sıradaki görev, split normalizasyonu sonrası kalan normal-gün uyuşmazlıklarını değerlendirip fiyat ölçeği kabul ölçütünü kesinleştirmektir.
 
 ## Tamamlananlar
 
@@ -68,6 +68,25 @@ Sıradaki görev kaynak kabul testinin kapsamını oluşturmak ve gerçek veri s
 - Önceki geçerli ham kapanışı bulunmayan kayıtların standart tavan hesabına alınmamasına karar verildi.
 - Açılış veya gün içi en yüksek fiyat hesaplanan üst fiyat limitini aşıyorsa kaydın standart dışı işlem durumu olarak `NA` bırakılması kararlaştırıldı.
 - İlk sürümde kapsamlı tarihsel serbest marj listesi oluşturulmamasına karar verildi.
+- Yerel kaynak kabul testi 10 hissede ve dört test döneminde gerçek İş Yatırım/yFinance verisiyle teknik olarak tamamlandı; nihai kabul durumu `PARTIAL` olarak güncellendi.
+- İş Yatırım'ın 31, yFinance'ın 8 gerçek kaynak sütunu doğrulandı ve `DATA_DICTIONARY.md` oluşturuldu.
+- Başlangıç ve fiyat adımı çevresi dönemlerinde tarih eşleşmesi `%100`; beş hisselik `2020-03-13`–`2026-07-26` tam döneminde `7.942/7.945` (`%99,9622`) olarak ölçüldü.
+- Beş hisselik tam dönemde 3 yFinance satırı/açılışı eksik, İş Yatırım TL hacmi eksik veya sıfır kayıt sayısı 0, yFinance adet hacmi eksik kayıt sayısı 3 ve sıfır kayıt sayısı 116 bulundu.
+- İki hacmin birlikte sıfır veya birlikte eksik olduğu ve açılış mevcutken iki hacmin birlikte eksik olduğu kayıt sayısı test kapsamlarında 0 bulundu.
+- Kurumsal işlem raporunda test dönemlerine giren 40 benzersiz olay satırının 39'unda iki kaynak aynı gün sinyal verdi; BIMAS `2020-10-14` temettüsü yalnız yFinance tarafından işaretlendi.
+- İş Yatırım `adjusted_close/raw_close` değişim kontrolünde `rtol=0.0001`, `atol=0.00005` sayısal toleransıyla kaynak yuvarlama gürültüsü gerçek olaylardan ayrıldı.
+- yFinance `auto_adjust=False` çağrısındaki geçmiş OHLC değerlerinin split ölçeğine geriye taşındığı; İş Yatırım `HG_*` ham fiyatlarının tarihindeki nominal ölçekte kaldığı ölçüldü. Beş hisselik tam dönemde değerlendirilebilen 7.942 hibrit OHLC satırının 3.542'si (`%44,60`) bu nedenle tutarsızdı.
+- D022'nin açılış/hacim durum kontrolleri üretilebilir bulundu; ancak yFinance açılışı ile İş Yatırım ham `high/low/close` değerlerinin doğrudan birleştirilmesi split ölçeği sorunu çözülmeden uygulanabilir kabul edilmedi.
+- D023, yFinance action alanları ile İş Yatırım düzeltme katsayısı sinyallerinin bilinen sınırlamaları korunarak uygulanabilir bulundu.
+- yFinance sağlayıcı OHLC değerlerini dönemin nominal ölçeğine geri taşımak için `t` tarihinden kesinlikle sonra gerçekleşen split oranlarının ticker bazında kümülatif çarpımı test edildi; split gününün kendi oranı o güne uygulanmadı.
+- Orijinal yFinance değerleri `yf_provider_*`, gelecekteki split çarpanı `yf_future_split_factor`, nominal karşılıklar `yf_nominal_*` alanlarında ayrı tutuldu.
+- Split faktörü; splitsiz dönem, split öncesi/günü/sonrası, birden fazla split, geçersiz oran ve ticker izolasyonu senaryolarıyla unit test edildi.
+- Beş hisselik tam dönemde açılışın İş Yatırım ham günlük aralığında olma oranı dönüşüm öncesi `%55,4017` iken nominal dönüşüm sonrasında `%96,4241` oldu; tutarsızlık `3.542` kayıttan `284` kayda indi.
+- Split yaşamış BIMAS, TUPRS ve SASA'nın normal günlerinde geçerlilik `%27,6546` değerinden `%96,0312` değerine yükseldi; `3.239` satır düzeldi, hiçbir satır kötüleşmedi ve `188` tutarsızlık kaldı.
+- Hisse bazında dönüşüm sonrası tam dönem geçerliliği BIMAS `%97,2310`, TUPRS `%97,0403`, SASA `%93,8955`, THYAO `%98,4257`, SISE `%95,5290` olarak ölçüldü.
+- Beş hisselik tam dönemde temettü günleri, split günleri ve düzeltme katsayısı değişim günleri dönüşüm sonrasında `%100` aralık geçerliliği verdi; D023 uyarınca bu günler yine normal gün kabulüne dahil edilmedi.
+- Kalan normal-gün uyuşmazlıklarında hem belirgin çok-kaynaklı tarih/fiyat farkları hem de sayısal/fiyat adımı ölçeğinde küçük sınır aşmaları gözlendi; bu görevde sabit kabul eşiği belirlenmedi.
+- Kaynak kabulü, eksiksiz teknik koşuya rağmen split yaşamış hisselerin normal günlerinde 188 tutarsızlık ve kesinleşmemiş kabul toleransı bulunduğu için `PARTIAL` olarak sınıflandırıldı.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -109,13 +128,11 @@ Sıradaki görev kaynak kabul testinin kapsamını oluşturmak ve gerçek veri s
 
 ## Sıradaki Görevler
 
-1. İş Yatırım ve yFinance için kaynak kabul testi kapsamını oluştur.
-2. Örnek hisselerde ham ve düzeltilmiş fiyat katsayısı değişimlerini doğrula.
-3. yFinance temettü, split ve action alanlarının kullanılabilirliğini doğrula.
-4. İki hacim alanının da eksik olduğu kayıtların sıklığını ölç.
-5. Kod değiştiren hisselerin eşleme yöntemini veri kabul testiyle doğrula.
-6. Gerçek veri sütunlarına göre `DATA_DICTIONARY.md` oluştur.
-7. Veri toplama koduna geç.
+1. Dönüşüm sonrası hisse/dönem/gün grubu oranlarını ve en büyük kalan uyuşmazlıkları değerlendirerek fiyat ölçeği kabul ölçütünü kesinleştir.
+2. `yf_future_split_factor` yaklaşımının veri sürümleme şartıyla kalıcı normalizasyon yöntemi olup olmayacağına karar ver.
+3. Kaynak kabul sonucu `PASS` olmadan genel veri toplama, label veya backtest altyapısına geçme.
+4. Kabul kararı sonrasında D022 veri kalite bayraklarını ve D023 kurumsal işlem sinyallerini modüler testlerle uygula.
+5. Kod değiştiren hisselerin eşleme yöntemini ayrı veri kabul örnekleriyle doğrula.
 
 ## Sonraki Ana Aşamalar
 
@@ -133,6 +150,10 @@ Sıradaki görev kaynak kabul testinin kapsamını oluşturmak ve gerçek veri s
 ## Açık Sorular
 
 - Açılış mevcutken iki hacim alanının da eksik olduğu kayıtlar nasıl ele alınacak?
+- Split normalizasyonu sonrası normal-gün geçerlilik oranı ve kalan aralık farkları için hangi kabul ölçütü uygulanacak?
+- `yf_future_split_factor` veri sürümleme şartıyla kalıcı fiyat birimi normalizasyonu olarak kabul edilecek mi?
+- İş Yatırım ve yFinance ham fiyat farkları için tarih/fiyat seviyesi etkili kabul toleransı nasıl belirlenecek?
+- İş Yatırım düzeltme katsayısı ile eşleşmeyen yFinance action kayıtları nasıl sınıflandırılacak?
 - Likidite filtresi nasıl belirlenecek?
 - Günlük kaç hisse seçilecek?
 - Komisyon ve slippage varsayımları ne olacak?
