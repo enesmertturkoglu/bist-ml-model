@@ -102,4 +102,8 @@ Bir test çalıştırılamadıysa nedeni açıkça yazılmalıdır. Yapılmamı�
 
 ## Mevcut Aşama
 
-Veri kaynakları ve başlangıç tarihi kesinleşti. Sıradaki aşama point-in-time hisse evreninin belirlenmesidir.
+Ana model dönemi `2020-03-13` tarihinde başlar.
+
+Standart normal adi paylarda tavan açılış `%10` marj ve içeri doğru fiyat adımı yuvarlamasıyla hesaplanır.
+
+Sıradaki aşama tarihsel hisse evreni ve özel işlem durumu istisnalarıdır.

@@ -69,9 +69,11 @@ Temel metrikler:
 
 ## Mevcut Aşama
 
-İlk sürüm veri kaynakları, veri başlangıç tarihi ve sabit aktif hisse evreni kesinleştirildi.
+Ana model dönemi `2020-03-13` tarihinde başlar.
 
-Sıradaki aşama tarihsel tavan fiyatı ve işlem yapılabilirlik yaklaşımının belirlenmesidir.
+Standart normal adi paylarda tavan açılış `%10` marj ve içeri doğru fiyat adımı yuvarlamasıyla hesaplanır.
+
+Sıradaki aşama tarihsel hisse evreni ve özel işlem durumu istisnalarıdır.
 
 Gerçek veri sütunları tam olarak belgelenmediği için feature listesi henüz kesin değildir.
 

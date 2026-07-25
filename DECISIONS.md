@@ -333,6 +333,101 @@ Veri toplama, hisse kimliği, veri temizleme, model eğitim evreni, walk-forward
 **Tarih:**  
 2026-07-25
 
+### D020 — Tarihsel Veri Başlangıcının Revizyonu
+
+**Karar:**  
+İlk sürümde model eğitimi, label üretimi ve backtest için kullanılacak ana tarihsel dönem `2020-03-13` tarihinde başlayacaktır.
+
+Daha önce belirlenen `2016-01-04` başlangıç tarihi bu kararla geçersiz kılınmıştır.
+
+Uygulama kuralları:
+
+- `2020-03-13` öncesindeki kayıtlar eğitim örneği, label veya backtest işlemi olarak kullanılmayacaktır.
+- Feature hesaplarının gerektirdiği geçmiş için `2020-03-13` öncesinden sınırlı warm-up verisi çekilebilir.
+- Warm-up kayıtları eğitim, label veya backtest evrenine dahil edilmeyecektir.
+- Sonradan halka arz edilen hisseler kendi ilk geçerli işlem tarihlerinden başlayacaktır.
+- Eksik geçmiş yapay olarak doldurulmayacaktır.
+- Veri toplama başlangıcı, model örneği başlangıcı ve walk-forward test başlangıcı ayrı ayarlar olarak tutulacaktır.
+- Walk-forward test başlangıcı daha sonra ayrıca kesinleştirilecektir.
+
+**Gerekçe:**  
+`2020-03-13` öncesindeki fiyat marjlarının ve tarihsel işlem esaslarının yeniden oluşturulması ilk sürüm için gereksiz veri mühendisliği karmaşıklığı yaratmaktadır. `2020-03-13` başlangıcı tavan açılış kontrolünün sade ve denetlenebilir biçimde uygulanmasını sağlar.
+
+**Etkilenen alanlar:**  
+Veri toplama, feature engineering, label, walk-forward validation, backtest ve merkezi config.
+
+**Tarih:**  
+2026-07-26
+
+### D021 — Tahmini Tavan Fiyatı ve Tavan Açılış Tespiti
+
+**Karar:**  
+`2020-03-13` ve sonrasındaki model evreninde bulunan normal BİST adi payları için günlük fiyat marjı `%10` kabul edilecektir.
+
+Tavan açılış tespitinde sabit `%9,90`, `%9,95` veya benzeri bir getiri eşiği kullanılmayacaktır.
+
+Tahmini üst fiyat limiti aşağıdaki yöntemle hesaplanacaktır:
+
+```text
+base_price = önceki geçerli işlem gününün İş Yatırım ham kapanış fiyatı
+raw_upper_limit = base_price × 1.10
+estimated_upper_limit = raw_upper_limit değerinin ilgili tarihte ve fiyat seviyesinde geçerli fiyat adımına aşağı yuvarlanmış hâli
+```
+
+Tavan açılış koşulu:
+
+```text
+is_limit_open = yFinance ham açılış fiyatı estimated_upper_limit değerine eşitse
+```
+
+Tavan hesabında düzeltilmiş fiyatlar kullanılmayacaktır.
+
+Ondalık kayan nokta hataları nedeniyle eşitlik kontrolünde yalnızca küçük bir sayısal tolerans kullanılacaktır. Bir tam fiyat adımı büyüklüğünde tolerans kullanılmayacaktır.
+
+Bu yaklaşım nedeniyle gerçekleşen yüzdesel artışın `%10`dan veya `%9,90`dan düşük görünmesi, kaydın tavan olmadığı anlamına gelmez.
+
+Örnek:
+
+```text
+base_price = 1,03
+raw_upper_limit = 1,03 × 1,10 = 1,133
+fiyat_adımı = 0,01
+estimated_upper_limit = 1,13
+gerçekleşen oran ≈ %9,71
+```
+
+Bu açılış tavan kabul edilecektir.
+
+Tavan açıldığı belirlenen kayıt için:
+
+- Pozisyona girilmiş kabul edilmeyecektir.
+- Kayıt negatif label yapılmayacaktır.
+- D013 uyarınca işlem ve label evreninde `NA` olarak dışarıda bırakılacaktır.
+- Günlük hacim bulunması veya açılış fiyatında işlem gerçekleşmiş olması, alışın gerçekleştirilebilir olduğunu kanıtlamayacaktır.
+
+Aşağıdaki durumlarda standart tavan hesabı uygulanmayacak ve kayıt `NA` veya özel inceleme durumuna alınacaktır:
+
+- Önceki geçerli ham kapanış bulunmuyorsa
+- İlk işlem günü ise
+- Serbest marj uygulanıyorsa
+- Normal adi pay dışında bir araçsa
+- Kurumsal işlem nedeniyle önceki kapanış doğrudan baz fiyat olarak kullanılamıyorsa
+- Kaynaklar arasında baz fiyat veya açılış için önemli uyuşmazlık varsa
+- İlgili tarihte geçerli fiyat adımı güvenilir biçimde belirlenemiyorsa
+
+Fiyat adımı kuralları tarih etkili biçimde merkezi bir tabloda tutulacaktır. Bu görevde söz konusu tablo veya hesaplama kodu oluşturulmayacaktır.
+
+**Gerekçe:**  
+Üst fiyat limiti, `%10` hesaplamasının geçerli fiyat adımına aşağı yuvarlanmasıyla oluşur. Bu nedenle gerçek tavan getirisi fiyat seviyesine göre `%10`un altında görünebilir. Sabit bir yüzdesel tolerans düşük fiyatlı hisselerde gerçek tavanları kaçırabilir veya tavan olmayan açılışları yanlış sınıflandırabilir.
+
+Hesaplanan fiyat seviyesine göre tavan tespiti yapmak hem sade hem de sabit `%9,90` eşiğinden daha doğrudur.
+
+**Etkilenen alanlar:**  
+Veri temizleme, tavan fiyatı hesaplama, işlem yapılabilirlik, label, backtest ve veri kalite kontrolleri.
+
+**Tarih:**  
+2026-07-26
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

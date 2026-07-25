@@ -1,10 +1,10 @@
 # PROJECT STATUS
 
-**Son güncelleme:** 2026-07-25
+**Son güncelleme:** 2026-07-26
 
 ## Mevcut Aşama
 
-İlk sürüm hisse evreni kesinleştirildi. Sıradaki aşama tarihsel tavan fiyatı ve işlem yapılabilirlik yaklaşımının belirlenmesidir.
+Veri kaynakları, `2020-03-13` tarihsel başlangıcı ve standart tavan açılış hesaplama yaklaşımı kesinleştirildi. Mevcut görev tarihsel hisse evreninin ve tavan hesabındaki özel durumların belirlenmesidir.
 
 ## Tamamlananlar
 
@@ -36,7 +36,6 @@
 - Açılış ve adet hacminin yFinance’den alınmasına karar verildi.
 - Kaynak uyuşmazlıklarının veri kalite kontrolüyle yönetilmesine karar verildi.
 - Yalnızca yFinance veya yalnızca İş Yatırım kullanılmamasına karar verildi.
-- Tarihsel veri başlangıcı `2016-01-04` olarak kesinleştirildi.
 - Sonradan halka arz edilen hisselerin kendi ilk işlem tarihlerinden başlayacağı kararlaştırıldı.
 - Eksik geçmişin geriye doğru doldurulmamasına karar verildi.
 - Veri toplama başlangıcı ile walk-forward test başlangıcının ayrı tutulmasına karar verildi.
@@ -48,6 +47,12 @@
 - Birleşme, devir veya menkul kıymet devamlılığı belirsiz durumlarda fiyat serilerinin otomatik birleştirilmemesine karar verildi.
 - ETF, fon, varant, sertifika ve rüçhan hakkı kuponlarının ilk sürüm evreninden çıkarılmasına karar verildi.
 - Point-in-time tarihsel evrenin sonraki bir geliştirme ve karşılaştırma aşamasına bırakılmasına karar verildi.
+- Tarihsel model dönemi başlangıcı `2020-03-13` olarak revize edildi.
+- `2016-01-04` başlangıcı geçersiz kılındı.
+- `2020-03-13` sonrasında normal adi paylar için `%10` fiyat marjının kullanılmasına karar verildi.
+- Tavan açılışın sabit `%9,90` eşiğiyle değil, `%10` ham limitin fiyat adımına aşağı yuvarlanmasıyla tespit edilmesine karar verildi.
+- Tavan açılan kayıtların işlem ve label evreninden `NA` olarak çıkarılacağı kesinleştirildi.
+- İlk işlem günü, serbest marj ve kurumsal işlem gibi standart hesaplamaya uygun olmayan durumların özel incelemeye alınacağı belirlendi.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -89,17 +94,16 @@
 
 ## Sıradaki Görevler
 
-1. Tarihsel tavan fiyatı ve işlem yapılabilirlik yaklaşımını kesinleştir.
-2. İşlem durumu verisinin gerekli olup olmadığını belirle.
-3. Güncel aktif hisse listesinin alınacağı resmi kaynağı kesinleştir.
-4. Aktif hisselerin eski kodlarını eşleştirme yöntemini veri kabul testiyle doğrula.
-5. Kaynak kabul testini tamamla.
-6. Gerçek veri sütunlarına göre `DATA_DICTIONARY.md` oluştur.
-7. Veri toplama koduna geç.
+1. Tarihsel hisse evreninin uygulamada nasıl oluşturulacağını kesinleştir.
+2. Kod değiştiren hisselerin eşleme yöntemini veri kabul testiyle doğrula.
+3. İlk işlem günü, serbest marj ve kurumsal işlem istisnalarının hangi veriyle tespit edileceğini belirle.
+4. Kaynak kabul testini tamamla.
+5. Gerçek veri sütunlarına göre `DATA_DICTIONARY.md` oluştur.
+6. Veri toplama koduna geç.
 
 ## Sonraki Ana Aşamalar
 
-1. Tarihsel tavan fiyatı ve işlem yapılabilirlik yaklaşımı
+1. Tarihsel hisse evreni ve özel işlem durumu istisnaları
 2. Veri toplama ve temizleme
 3. Label üretim kodu ve testleri
 4. Feature engineering
@@ -112,11 +116,10 @@
 
 ## Açık Sorular
 
-- Tarihsel tavan fiyatı nasıl belirlenecek?
-- İşlem durumu verisi gerekli olacak mı?
+- Tarihsel hisse evreni nasıl oluşturulacak?
+- Kod değiştiren hisseler nasıl eşlenecek?
+- İlk işlem günü, serbest marj ve kurumsal işlem istisnaları hangi veriyle tespit edilecek?
 - Likidite filtresi nasıl belirlenecek?
 - Günlük kaç hisse seçilecek?
 - Komisyon ve slippage varsayımları ne olacak?
-- Güncel aktif hisse listesinin resmi ve tekrarlanabilir kaynağı hangisi olacak?
-- Aktif hisselerin eski kodlarını toplu olarak hangi Borsa İstanbul veya KAP verisiyle eşleştireceğiz?
-- Point-in-time tarihsel evren hangi proje aşamasında yeniden ele alınacak?
+- İlk walk-forward test tarihi ne olacak?
