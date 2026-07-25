@@ -4,7 +4,7 @@
 
 ## Mevcut Aşama
 
-Veri kaynakları ve tarihsel veri başlangıcı kesinleştirildi. Mevcut görev survivorship bias oluşturmayan tarihsel hisse evreninin belirlenmesidir.
+İlk sürüm hisse evreni kesinleştirildi. Sıradaki aşama tarihsel tavan fiyatı ve işlem yapılabilirlik yaklaşımının belirlenmesidir.
 
 ## Tamamlananlar
 
@@ -40,6 +40,14 @@ Veri kaynakları ve tarihsel veri başlangıcı kesinleştirildi. Mevcut görev 
 - Sonradan halka arz edilen hisselerin kendi ilk işlem tarihlerinden başlayacağı kararlaştırıldı.
 - Eksik geçmişin geriye doğru doldurulmamasına karar verildi.
 - Veri toplama başlangıcı ile walk-forward test başlangıcının ayrı tutulmasına karar verildi.
+- İlk sürümde güncel aktif BİST paylarından oluşan sabit hisse evreninin kullanılmasına karar verildi.
+- Günümüzde aktif olmayan ve kot dışı kalmış hisselerin ilk sürüm evrenine dahil edilmemesine karar verildi.
+- Bu yaklaşımın survivorship bias oluşturduğu ve sonuçların tam point-in-time backtest olarak sunulmayacağı açıkça kabul edildi.
+- Güncel aktif hisselerin doğrulanmış eski işlem kodlarının aynı `security_id` altında birleştirilmesine karar verildi.
+- Kod eşleştirmesinde resmi Borsa İstanbul veya KAP kayıtlarının kullanılmasına karar verildi.
+- Birleşme, devir veya menkul kıymet devamlılığı belirsiz durumlarda fiyat serilerinin otomatik birleştirilmemesine karar verildi.
+- ETF, fon, varant, sertifika ve rüçhan hakkı kuponlarının ilk sürüm evreninden çıkarılmasına karar verildi.
+- Point-in-time tarihsel evrenin sonraki bir geliştirme ve karşılaştırma aşamasına bırakılmasına karar verildi.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -55,6 +63,18 @@ Veri kaynakları ve tarihsel veri başlangıcı kesinleştirildi. Mevcut görev 
 - Süre sonu çıkışı: `close[T+3]`
 - Stop-loss: İlk sürümde yok
 
+## İlk Sürüm Hisse Evreni
+
+- Evren referansı: Veri toplama başlangıcındaki güncel aktif BİST şirket payları
+- Tarihsel kullanım: Aynı aktif liste bütün geçmiş veri dönemine uygulanacak
+- Kot dışı ve günümüzde aktif olmayan hisseler: İlk sürüme dahil edilmeyecek
+- Kod değiştiren aktif hisseler: Eski ve yeni kodlar aynı `security_id` altında eşleştirilecek
+- Kod eşleştirme kaynağı: Borsa İstanbul ve gerektiğinde KAP
+- Finansal araç kapsamı: Yalnızca şirket payları
+- Bilinen sınırlama: Survivorship bias
+- Sonuçların yorumu: Tam point-in-time backtest değildir
+- Gelecek geliştirme: Point-in-time tarihsel evrenle karşılaştırmalı deney
+
 ## Belge Yönetimi ve Codex Devir Kuralı
 
 - Ana kaynak: `https://github.com/enesmertturkoglu/bist-ml-model`
@@ -69,15 +89,17 @@ Veri kaynakları ve tarihsel veri başlangıcı kesinleştirildi. Mevcut görev 
 
 ## Sıradaki Görevler
 
-1. Point-in-time tarihsel hisse evrenini kesinleştir.
-2. Kod değişiklikleri ve kot dışı hisselerin nasıl izleneceğini belirle.
-3. Tarihsel tavan fiyatı ve işlem yapılabilirlik yaklaşımını kesinleştir.
-4. Gerçek veri sütunlarına göre `DATA_DICTIONARY.md` hazırlamadan önce kaynak kabul testini tamamla.
-5. Daha sonra veri toplama koduna geç.
+1. Tarihsel tavan fiyatı ve işlem yapılabilirlik yaklaşımını kesinleştir.
+2. İşlem durumu verisinin gerekli olup olmadığını belirle.
+3. Güncel aktif hisse listesinin alınacağı resmi kaynağı kesinleştir.
+4. Aktif hisselerin eski kodlarını eşleştirme yöntemini veri kabul testiyle doğrula.
+5. Kaynak kabul testini tamamla.
+6. Gerçek veri sütunlarına göre `DATA_DICTIONARY.md` oluştur.
+7. Veri toplama koduna geç.
 
 ## Sonraki Ana Aşamalar
 
-1. Point-in-time tarihsel hisse evreni
+1. Tarihsel tavan fiyatı ve işlem yapılabilirlik yaklaşımı
 2. Veri toplama ve temizleme
 3. Label üretim kodu ve testleri
 4. Feature engineering
@@ -90,9 +112,11 @@ Veri kaynakları ve tarihsel veri başlangıcı kesinleştirildi. Mevcut görev 
 
 ## Açık Sorular
 
-- Survivorship bias oluşturmayan tarihsel hisse evreni nasıl oluşturulacak?
 - Tarihsel tavan fiyatı nasıl belirlenecek?
 - İşlem durumu verisi gerekli olacak mı?
 - Likidite filtresi nasıl belirlenecek?
 - Günlük kaç hisse seçilecek?
 - Komisyon ve slippage varsayımları ne olacak?
+- Güncel aktif hisse listesinin resmi ve tekrarlanabilir kaynağı hangisi olacak?
+- Aktif hisselerin eski kodlarını toplu olarak hangi Borsa İstanbul veya KAP verisiyle eşleştireceğiz?
+- Point-in-time tarihsel evren hangi proje aşamasında yeniden ele alınacak?

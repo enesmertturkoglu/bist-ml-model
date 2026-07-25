@@ -293,10 +293,49 @@ Veri toplama, veri saklama, feature başlangıçları, walk-forward validation, 
 **Tarih:**  
 2026-07-25
 
+### D019 — İlk Sürüm Hisse Evreni
+
+**Karar:**  
+İlk sürümde hisse evreni, veri toplama ve model geliştirme çalışmasının başladığı tarihte Borsa İstanbul'da aktif olarak işlem gören paylardan oluşturulacaktır.
+
+Bu güncel aktif hisse listesi, ilk sürümün bütün tarihsel veri dönemi boyunca sabit evren olarak kullanılacaktır.
+
+Günümüzde kot dışı kalmış, devrolmuş, sona ermiş veya artık aktif olarak işlem görmeyen hisseler ilk sürüm evrenine dahil edilmeyecektir.
+
+Bu yaklaşımın survivorship bias oluşturduğu açıkça kabul edilecek ve ilk sürüm sonuçları tam point-in-time tarihsel evren sonucu olarak sunulmayacaktır.
+
+Güncel aktif bir hissenin geçmişte kod değiştirmiş olması halinde:
+
+- Güncel kod ana kimlik olarak kullanılacaktır.
+- Eski ve yeni kodlar resmi Borsa İstanbul veya KAP kod değişikliği kayıtlarıyla doğrulanacaktır.
+- Doğrulanmış eski kodlar aynı sabit `security_id` altında güncel hisseyle eşleştirilecektir.
+- Eski kod dönemindeki fiyat ve hacim verileri, ilgili geçerlilik tarihleri korunarak aynı menkul kıymetin geçmişine dahil edilecektir.
+- Eski tarihlerin gerçek ticker bilgisi yeni kodla değiştirilmeden ayrıca saklanacaktır.
+
+Yalnızca şirket adı benzerliği veya fiyat serisi benzerliği kod eşleştirmesi için yeterli kabul edilmeyecektir.
+
+Birleşme, devir, bölünme veya yeni bir menkul kıymet oluşumu nedeniyle hukuki ve ekonomik devamlılık belirsizse geçmiş seriler otomatik olarak birleştirilmeyecektir. Bu kayıtlar manuel inceleme gerektiren istisnalar olarak işaretlenecektir.
+
+İlk sürümde kullanılacak finansal araç kapsamı yalnızca Borsa İstanbul'da işlem gören şirket paylarıdır. ETF, yatırım fonu, varant, sertifika, rüçhan hakkı kuponu ve benzeri araçlar evrene dahil edilmeyecektir.
+
+Point-in-time tarihsel evren oluşturulması sonraki bir geliştirme aşaması olarak korunacaktır. İleride point-in-time evrene geçildiğinde aynı model ve test dönemleriyle karşılaştırmalı bir deney yapılacaktır.
+
+**Gerekçe:**  
+Güncel aktif hisse listesinin kullanılması veri toplama, kod eşleştirme ve ilk model altyapısını sadeleştirir. Böylece fiyat toplama, veri temizleme, label üretimi ve walk-forward pipeline daha hızlı ve test edilebilir şekilde kurulabilir.
+
+Bununla birlikte günümüzde aktif olmayan şirketlerin geçmiş veriden çıkarılması survivorship bias oluşturur. Bu nedenle karar bir doğruluk iddiası değil, bilinçli bir ilk sürüm kapsam daraltmasıdır.
+
+Kod değiştiren güncel hisselerin eski kodlarının eşleştirilmesi, aktif evrende yer alan şirketlerin mevcut tarihsel verilerinin gereksiz yere kaybedilmesini önler.
+
+**Etkilenen alanlar:**  
+Veri toplama, hisse kimliği, veri temizleme, model eğitim evreni, walk-forward validation, backtest sonuçlarının yorumlanması ve ileride yapılacak point-in-time evren deneyi.
+
+**Tarih:**  
+2026-07-25
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi
-- Hisse evreni
 - Günlük seçilecek hisse sayısı
 - Komisyon ve slippage varsayımları
 

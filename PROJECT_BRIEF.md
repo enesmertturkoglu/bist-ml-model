@@ -22,10 +22,22 @@ Sistem her hisse için pozitif sınıf olasılığı üretecek ve hisseleri bu o
 - BİST endeks verileri
 - Sektör bilgileri
 - Likidite bilgileri
+- Veri toplama başlangıcındaki güncel aktif BİST şirket paylarından oluşan sabit hisse evreni
+- Güncel aktif hisselerin doğrulanmış eski işlem kodlarının aynı menkul kıymet kimliği altında birleştirilmesi
 - Fiyat, hacim, momentum, volatilite ve relatif güç feature'ları
 - Zaman sıralı walk-forward validation
 - Gerçekçi backtest
 - Daha sonra paper trading
+
+## İlk Sürüm Evren Sınırlaması
+
+İlk sürümde veri toplama ve model geliştirme sürecini sadeleştirmek için güncel aktif BİST şirket paylarından oluşan sabit evren kullanılacaktır.
+
+Günümüzde aktif olmayan ve kot dışı kalmış hisseler ilk sürümün geçmiş eğitim ve backtest evrenine dahil edilmeyecektir.
+
+Bu seçim survivorship bias oluşturur. Bu nedenle ilk sürüm sonuçları tam point-in-time tarihsel evren performansı olarak yorumlanmayacaktır.
+
+Point-in-time tarihsel evren, sade pipeline çalışır hale geldikten sonra ayrı bir geliştirme ve karşılaştırmalı deney konusu olacaktır.
 
 ## İlk Sürümde Kullanılmayacaklar
 
@@ -57,7 +69,9 @@ Temel metrikler:
 
 ## Mevcut Aşama
 
-Veri kaynakları ve başlangıç tarihi kesinleşti. Sıradaki aşama point-in-time hisse evreninin belirlenmesidir.
+İlk sürüm veri kaynakları, veri başlangıç tarihi ve sabit aktif hisse evreni kesinleştirildi.
+
+Sıradaki aşama tarihsel tavan fiyatı ve işlem yapılabilirlik yaklaşımının belirlenmesidir.
 
 Gerçek veri sütunları tam olarak belgelenmediği için feature listesi henüz kesin değildir.
 
