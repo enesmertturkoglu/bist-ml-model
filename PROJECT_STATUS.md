@@ -4,7 +4,9 @@
 
 ## Mevcut Aşama
 
-Veri kaynakları, `2020-03-13` tarihsel başlangıcı ve standart tavan açılış hesaplama yaklaşımı kesinleştirildi. Mevcut görev tarihsel hisse evreninin ve tavan hesabındaki özel durumların belirlenmesidir.
+Veri kaynakları, `2020-03-13` tarihsel başlangıcı, standart tavan açılış hesabı ve temel `T+1` işlem yapılabilirlik kuralları kesinleştirildi.
+
+Mevcut görev ilk işlem günü, serbest marj ve kurumsal işlem istisnalarının veri kaynaklarıyla nasıl tespit edileceğinin belirlenmesidir.
 
 ## Tamamlananlar
 
@@ -53,6 +55,13 @@ Veri kaynakları, `2020-03-13` tarihsel başlangıcı ve standart tavan açılı
 - Tavan açılışın sabit `%9,90` eşiğiyle değil, `%10` ham limitin fiyat adımına aşağı yuvarlanmasıyla tespit edilmesine karar verildi.
 - Tavan açılan kayıtların işlem ve label evreninden `NA` olarak çıkarılacağı kesinleştirildi.
 - İlk işlem günü, serbest marj ve kurumsal işlem gibi standart hesaplamaya uygun olmayan durumların özel incelemeye alınacağı belirlendi.
+- `T+1` ham açılış fiyatı bulunmayan kayıtların negatif label yerine `NA` bırakılmasına karar verildi.
+- İş Yatırım TL hacmi ile yFinance adet hacminin birlikte sıfır olduğu günlerin işlem gerçekleşmemiş kabul edilmesine karar verildi.
+- Hacim alanlarından en az biri pozitifse kaydın yalnızca hacim nedeniyle elenmemesine karar verildi.
+- Hacimlerden biri pozitifken diğerinin sıfır veya eksik olmasının yalnızca veri kalite uyarısı oluşturmasına karar verildi.
+- İlk sürümde düşük fakat pozitif hacim nedeniyle otomatik hisse elemesi yapılmamasına karar verildi.
+- Likidite filtresinin temel giriş geçerliliğinden ayrılarak daha sonraki bir karar ve deney konusu olmasına karar verildi.
+- Tavan açılış, ilk işlem günü, serbest marj ve kurumsal işlem şüphesi bulunan kayıtların `NA` veya özel inceleme durumuna alınması kesinleştirildi.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -94,12 +103,14 @@ Veri kaynakları, `2020-03-13` tarihsel başlangıcı ve standart tavan açılı
 
 ## Sıradaki Görevler
 
-1. Tarihsel hisse evreninin uygulamada nasıl oluşturulacağını kesinleştir.
-2. Kod değiştiren hisselerin eşleme yöntemini veri kabul testiyle doğrula.
-3. İlk işlem günü, serbest marj ve kurumsal işlem istisnalarının hangi veriyle tespit edileceğini belirle.
-4. Kaynak kabul testini tamamla.
-5. Gerçek veri sütunlarına göre `DATA_DICTIONARY.md` oluştur.
-6. Veri toplama koduna geç.
+1. İlk işlem günü kayıtlarının güvenilir biçimde nasıl tespit edileceğini belirle.
+2. Serbest marj uygulanan günlerin hangi veri kaynağıyla tespit edileceğini belirle.
+3. Temettü, bölünme, bedelli ve bedelsiz işlemlerin hangi İş Yatırım, yFinance, KAP veya Borsa İstanbul alanlarıyla tespit edileceğini belirle.
+4. İki hacim alanının da eksik olduğu kayıtların sıklığını veri kabul testinde ölç.
+5. Kod değiştiren hisselerin eşleme yöntemini veri kabul testiyle doğrula.
+6. Kaynak kabul testini tamamla.
+7. Gerçek veri sütunlarına göre `DATA_DICTIONARY.md` oluştur.
+8. Veri toplama koduna geç.
 
 ## Sonraki Ana Aşamalar
 
@@ -116,9 +127,10 @@ Veri kaynakları, `2020-03-13` tarihsel başlangıcı ve standart tavan açılı
 
 ## Açık Sorular
 
-- Tarihsel hisse evreni nasıl oluşturulacak?
-- Kod değiştiren hisseler nasıl eşlenecek?
-- İlk işlem günü, serbest marj ve kurumsal işlem istisnaları hangi veriyle tespit edilecek?
+- İlk işlem günü hangi veriyle güvenilir biçimde tespit edilecek?
+- Serbest marj uygulaması hangi veriyle tespit edilecek?
+- Kurumsal işlem günleri hangi kaynakların birleşimiyle tespit edilecek?
+- Açılış mevcutken iki hacim alanının da eksik olduğu kayıtlar nasıl ele alınacak?
 - Likidite filtresi nasıl belirlenecek?
 - Günlük kaç hisse seçilecek?
 - Komisyon ve slippage varsayımları ne olacak?

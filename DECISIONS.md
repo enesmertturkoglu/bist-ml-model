@@ -428,6 +428,55 @@ Veri temizleme, tavan fiyatı hesaplama, işlem yapılabilirlik, label, backtest
 **Tarih:**  
 2026-07-26
 
+### D022 — T+1 Temel İşlem Yapılabilirlik ve Hacim Kontrolü
+
+**Karar:**  
+`T+1` açılışında giriş yapılabilirliği değerlendirilirken aşağıdaki sade ve kapsayıcı kurallar uygulanacaktır:
+
+- yFinance ham açılış fiyatı bulunmuyorsa veya geçerli pozitif bir değer değilse pozisyona girilmeyecek; kayıt negatif label yapılmadan `NA` bırakılacaktır.
+- İş Yatırım TL işlem hacmi ile yFinance işlem gören pay adedi birlikte sıfırsa ilgili gün işlem gerçekleşmemiş kabul edilecek ve kayıt `NA` bırakılacaktır.
+- İki hacim alanından en az biri pozitifse kayıt yalnızca hacim nedeniyle elenmeyecektir.
+- Hacim alanlarından biri pozitif, diğeri sıfır veya eksikse kayıt işlem evreninde tutulacak; yalnızca veri kalite uyarısı ile işaretlenecektir.
+- Pozitif fakat düşük hacim ilk sürümde otomatik eleme nedeni olmayacaktır.
+- Likidite eşiği bu kararın parçası değildir; daha sonra ayrı bir karar ve kontrollü deney olarak değerlendirilecektir.
+- D021’e göre tavan açıldığı belirlenen kayıtlar `NA` bırakılacaktır.
+- İlk işlem günü, serbest marj uygulaması veya kurumsal işlem nedeniyle standart `%10` tavan hesabının güvenilir olmadığı kayıtlar `NA` veya özel inceleme durumuna alınacaktır.
+- Hacim uyuşmazlıkları model feature’ı olarak kullanılmayacak; yalnızca veri kalite kontrolü ve raporlama amacıyla saklanacaktır.
+
+Her kayıt için mümkün olduğunca aşağıdaki durum alanları ayrı tutulacaktır:
+
+```text
+entry_eligible
+entry_exclusion_reason
+volume_quality_flag
+```
+
+Önerilen neden kodları:
+
+```text
+NO_OPEN
+NO_TRADE
+LIMIT_OPEN
+FIRST_TRADING_DAY
+SPECIAL_MARGIN
+CORPORATE_ACTION_SUSPECTED
+INVALID_OHLC
+SOURCE_VOLUME_CONFLICT
+```
+
+İki hacim alanının da eksik olduğu ancak açılış fiyatının bulunduğu durum için bu aşamada yeni bir kesin kural oluşturulmayacaktır. Bu durum veri kabul testinde ölçülerek açık soru olarak korunacaktır.
+
+**Gerekçe:**
+Hacim verilerindeki tek kaynaklı eksiklikler nedeniyle gereksiz sayıda hisse ve eğitim örneği kaybetmemek amaçlanmaktadır. Günlük hacmin düşük olması tek başına girişin gerçekleşmediğini göstermez ve uygulanabilir minimum hacim, portföy ile emir büyüklüğüne bağlıdır. Bu nedenle ilk sürümde hacim kontrolü katı bir likidite filtresi değil, temel işlem gerçekleşme ve veri kalite kontrolü olarak kullanılacaktır.
+
+Gerçekten işlem gerçekleşmediğini güçlü biçimde gösteren açılış eksikliği veya iki hacim değerinin birlikte sıfır olması ise `NA` için yeterli kabul edilecektir.
+
+**Etkilenen alanlar:**
+Veri temizleme, işlem yapılabilirlik, label üretimi, backtest, veri kalite raporları ve ilerideki likidite filtresi deneyleri.
+
+**Tarih:**
+2026-07-26
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi
