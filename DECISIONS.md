@@ -217,6 +217,57 @@ Proje yönetimi, GitHub iş akışı, karar kaydı, durum takibi, kod geliştirm
 **Tarih:**  
 2026-07-25
 
+### D017 — İlk Sürüm Veri Kaynakları
+
+**Karar:**  
+İlk sürümde ücretsiz hibrit veri yaklaşımı kullanılacaktır.
+
+Ana veri kaynağı İş Yatırım’ın internet sitesinden veri alan `isyatirimhisse` kütüphanesi olacaktır.
+
+İş Yatırım kaynağından öncelikle şu alanlar kullanılacaktır:
+
+- Ham en yüksek, en düşük ve kapanış fiyatları
+- Düzeltilmiş en yüksek, en düşük ve kapanış fiyatları
+- TL işlem hacmi
+- Ağırlıklı ortalama fiyat
+- BIST endeks verileri
+- Piyasa değeri ve halka açık piyasa değeri gibi mevcut yardımcı alanlar
+- Ana işlem günü takvimi
+
+yFinance tamamlayıcı veri kaynağı olacaktır.
+
+yFinance kaynağından öncelikle şu alanlar kullanılacaktır:
+
+- Açılış fiyatı
+- İşlem gören pay adedi
+- İş Yatırım fiyatları için bağımsız çapraz kontrol
+
+Kaynaklar tarih ve hisse kodu üzerinden birleştirilecektir.
+
+Birleştirme kuralları:
+
+1. Ana işlem takvimi İş Yatırım verisinden oluşturulacaktır.
+2. yFinance’te bulunup İş Yatırım’da bulunmayan bir tarih otomatik olarak geçerli işlem günü kabul edilmeyecektir.
+3. İş Yatırım’da bulunup yFinance’te bulunmayan bir tarihte açılış fiyatı eksik kabul edilecek; giriş ve label hesabı `NA` olarak dışarıda bırakılacaktır.
+4. Ham high, low veya close değerleri kaynaklar arasında geçerli fiyat adımından daha fazla farklıysa kayıt veri kalite kontrolüne alınacaktır.
+5. Çözülemeyen önemli fiyat uyuşmazlıkları eğitim ve backtest verisine dahil edilmeyecektir.
+6. yFinance fiyatları otomatik düzeltilmiş şekilde kullanılmayacaktır. Ham fiyatlar ayrı, düzeltilmiş fiyatlar ayrı tutulacaktır.
+7. yFinance tarih aralığında bitiş tarihinin hariç olması dikkate alınacaktır.
+8. Her iki kaynaktan alınan ham cevaplar sonradan denetlenebilmesi için değişmeden saklanacaktır.
+
+Tavan fiyatı, işlem durumu ve tarihsel hisse evreni bu iki kaynak tarafından tam olarak çözülmemektedir. Bu konular ayrı kararlar olarak ele alınacaktır.
+
+**Gerekçe:**  
+İş Yatırım verisi ham ve düzeltilmiş fiyatları, TL hacmi, AOF ve endeks bilgilerini birlikte sunmaktadır ancak açılış fiyatı sağlamamaktadır. yFinance açılış ve adet hacmi sağlamaktadır ancak işlem takvimi ve bazı geçmiş kayıtlarında tek başına güvenilir değildir. İki kaynağın birlikte kullanılması ilk sürüm için ücretsiz ve daha güvenilir bir veri yapısı sağlar.
+
+THYAO örneğinde kaynakların fiyatları büyük ölçüde eşleşmiş; ancak iptal edilmiş işlem günü, eksik yarım işlem günü ve birkaç fiyat uyuşmazlığı tespit edilmiştir. Bu nedenle kaynaklardan biri tek başına kullanılmayacaktır.
+
+**Etkilenen alanlar:**  
+Veri toplama, veri birleştirme, label üretimi, feature engineering, veri kalite kontrolleri ve backtest.
+
+**Tarih:**  
+2026-07-25
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

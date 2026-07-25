@@ -4,7 +4,7 @@
 
 ## Mevcut Aşama
 
-Label ve işlem senaryosu tamamlandı. Sıradaki ana aşama veri kaynağı ve hisse evreninin belirlenmesidir.
+Veri kaynakları kesinleştirildi. Mevcut görev tarihsel veri başlangıcının ve point-in-time hisse evreninin belirlenmesidir.
 
 ## Tamamlananlar
 
@@ -30,6 +30,12 @@ Label ve işlem senaryosu tamamlandı. Sıradaki ana aşama veri kaynağı ve hi
 - Her kesin karar veya gerekli belge güncellemesi sonrasında sohbetin otomatik olarak kopyalanabilir bir Codex devir talimatı vermesi zorunlu hale getirildi.
 - Codex çalışma kurallarını repo düzeyinde tanımlayan `AGENTS.md` dosyası hazırlandı.
 - Dört güncel yönetim dosyası (`PROJECT_BRIEF.md`, `PROJECT_STATUS.md`, `DECISIONS.md`, `AGENTS.md`) GitHub reposuna yüklendi.
+- THYAO için aynı tarih aralığındaki İş Yatırım ve yFinance verileri karşılaştırıldı.
+- İş Yatırım ana, yFinance tamamlayıcı kaynak olarak seçildi.
+- Ana işlem takviminin İş Yatırım verisinden oluşturulmasına karar verildi.
+- Açılış ve adet hacminin yFinance’den alınmasına karar verildi.
+- Kaynak uyuşmazlıklarının veri kalite kontrolüyle yönetilmesine karar verildi.
+- Yalnızca yFinance veya yalnızca İş Yatırım kullanılmamasına karar verildi.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -59,9 +65,9 @@ Label ve işlem senaryosu tamamlandı. Sıradaki ana aşama veri kaynağı ve hi
 
 ## Sıradaki Görevler
 
-1. Veri kaynağı seçeneklerini değerlendirmek.
-2. İlk sürümde kullanılacak hisse evrenini belirlemek.
-3. Seçilen kaynaktan küçük bir OHLCV örneği indirmek.
+1. Tarihsel veri başlangıcını belirlemek.
+2. Survivorship bias oluşturmayan point-in-time hisse evrenini belirlemek.
+3. Seçilen kaynaklardan küçük bir OHLCV örneği indirmek.
 4. Açılış, high, kapanış, işlem görmeme ve düzeltilmiş fiyat alanlarının yeterliliğini kontrol etmek.
 5. Gerçek sütunlara göre `DATA_DICTIONARY.md` oluşturmak.
 6. Label üretim fonksiyonunu örnek veri üzerinde uygulamak ve birim testlerini yazmak.
@@ -70,7 +76,7 @@ Label ve işlem senaryosu tamamlandı. Sıradaki ana aşama veri kaynağı ve hi
 
 ## Sonraki Ana Aşamalar
 
-1. Veri kaynağı ve hisse evreni
+1. Tarihsel veri başlangıcı ve point-in-time hisse evreni
 2. Veri toplama ve temizleme
 3. Label üretim kodu ve testleri
 4. Feature engineering
@@ -83,11 +89,10 @@ Label ve işlem senaryosu tamamlandı. Sıradaki ana aşama veri kaynağı ve hi
 
 ## Açık Sorular
 
-- Kullanılacak veri sağlayıcısı hangisi olacak?
-- Veri başlangıç tarihi ne olacak?
-- Hisse evreni nasıl tanımlanacak?
-- Düzeltilmiş open, high, low ve close verileri bulunabilecek mi?
-- Tavan fiyat ve işlem durdurma bilgileri veri kaynağından alınabilecek mi?
+- Tarihsel veri başlangıcı ne olacak?
+- Survivorship bias oluşturmayan tarihsel hisse evreni nasıl oluşturulacak?
+- Tarihsel tavan fiyatı nasıl belirlenecek?
+- İşlem durumu verisi gerekli olacak mı?
 - Likidite filtresi nasıl belirlenecek?
 - Günlük kaç hisse seçilecek?
 - Komisyon ve slippage varsayımları ne olacak?

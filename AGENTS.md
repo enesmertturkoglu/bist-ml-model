@@ -102,4 +102,4 @@ Bir test çalıştırılamadıysa nedeni açıkça yazılmalıdır. Yapılmamı�
 
 ## Mevcut Aşama
 
-Label ve işlem senaryosu tamamlanmıştır. Sıradaki ana aşama veri kaynağı ve hisse evreninin belirlenmesidir.
+Veri kaynakları kesinleştirildi. Mevcut görev tarihsel veri başlangıcının ve point-in-time hisse evreninin belirlenmesidir.

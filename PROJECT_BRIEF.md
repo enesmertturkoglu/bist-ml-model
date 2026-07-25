@@ -57,9 +57,9 @@ Temel metrikler:
 
 ## Mevcut Aşama
 
-Label ve işlem senaryosu tamamlandı. Mevcut ana aşama veri kaynağı ve hisse evreninin belirlenmesidir.
+Veri kaynakları kesinleştirildi. Mevcut görev tarihsel veri başlangıcının ve point-in-time hisse evreninin belirlenmesidir.
 
-Veri kaynağı henüz seçilmediği için veri sütunları ve feature listesi henüz kesin değildir.
+Gerçek veri sütunları tam olarak belgelenmediği için feature listesi henüz kesin değildir.
 
 ## Sohbetler Arası Devir Standardı
 
