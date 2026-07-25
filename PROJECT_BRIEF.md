@@ -57,7 +57,7 @@ Temel metrikler:
 
 ## Mevcut Aşama
 
-Veri kaynakları kesinleştirildi. Mevcut görev tarihsel veri başlangıcının ve point-in-time hisse evreninin belirlenmesidir.
+Veri kaynakları ve başlangıç tarihi kesinleşti. Sıradaki aşama point-in-time hisse evreninin belirlenmesidir.
 
 Gerçek veri sütunları tam olarak belgelenmediği için feature listesi henüz kesin değildir.
 

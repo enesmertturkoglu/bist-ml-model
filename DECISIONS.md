@@ -268,6 +268,31 @@ Veri toplama, veri birleştirme, label üretimi, feature engineering, veri kalit
 **Tarih:**  
 2026-07-25
 
+### D018 — Tarihsel Veri Başlangıcı
+
+**Karar:**  
+İlk sürümde tarihsel piyasa verileri `2016-01-04` tarihinden itibaren toplanacaktır.
+
+Bu tarih bütün hisseler için yapay bir başlangıç tarihi olarak uygulanmayacaktır:
+
+- `2016-01-04` tarihinden sonra halka arz edilen hisseler kendi ilk geçerli işlem tarihlerinden başlayacaktır.
+- Bir hissenin ilk işlem tarihinden önceki dönem geriye doğru doldurulmayacaktır.
+- Eksik fiyat veya hacim geçmişi yapay değerlerle tamamlanmayacaktır.
+- Model satırları, kullanılan feature’ların gerektirdiği en uzun geçmiş pencere tamamlandıktan sonra uygun hâle gelecektir.
+- Veri toplama başlangıcı ile ilk walk-forward test tarihi ayrı ayarlar olarak tutulacaktır.
+- İlk test dönemi, yeterli eğitim geçmişi bırakacak şekilde daha sonra kesinleştirilecektir.
+
+**Gerekçe:**  
+`2016-01-04`, BISTECH geçişi sonrasındaki ilk tam takvim yılının ilk işlem günüdür. Yaklaşık on yıllık veri; kur krizi, COVID dönemi, yüksek enflasyon ve farklı piyasa rejimlerini kapsarken daha eski piyasa yapılarından kaynaklanabilecek gereksiz veri karmaşıklığını sınırlar.
+
+Veri başlangıcı ile test başlangıcını ayırmak, feature geçmişi ve model eğitimi için yeterli gözlem bırakılmasını sağlar.
+
+**Etkilenen alanlar:**  
+Veri toplama, veri saklama, feature başlangıçları, walk-forward validation, backtest ve merkezi config.
+
+**Tarih:**  
+2026-07-25
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

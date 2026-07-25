@@ -4,7 +4,7 @@
 
 ## Mevcut Aşama
 
-Veri kaynakları kesinleştirildi. Mevcut görev tarihsel veri başlangıcının ve point-in-time hisse evreninin belirlenmesidir.
+Veri kaynakları ve tarihsel veri başlangıcı kesinleştirildi. Mevcut görev survivorship bias oluşturmayan tarihsel hisse evreninin belirlenmesidir.
 
 ## Tamamlananlar
 
@@ -36,6 +36,10 @@ Veri kaynakları kesinleştirildi. Mevcut görev tarihsel veri başlangıcının
 - Açılış ve adet hacminin yFinance’den alınmasına karar verildi.
 - Kaynak uyuşmazlıklarının veri kalite kontrolüyle yönetilmesine karar verildi.
 - Yalnızca yFinance veya yalnızca İş Yatırım kullanılmamasına karar verildi.
+- Tarihsel veri başlangıcı `2016-01-04` olarak kesinleştirildi.
+- Sonradan halka arz edilen hisselerin kendi ilk işlem tarihlerinden başlayacağı kararlaştırıldı.
+- Eksik geçmişin geriye doğru doldurulmamasına karar verildi.
+- Veri toplama başlangıcı ile walk-forward test başlangıcının ayrı tutulmasına karar verildi.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -65,18 +69,15 @@ Veri kaynakları kesinleştirildi. Mevcut görev tarihsel veri başlangıcının
 
 ## Sıradaki Görevler
 
-1. Tarihsel veri başlangıcını belirlemek.
-2. Survivorship bias oluşturmayan point-in-time hisse evrenini belirlemek.
-3. Seçilen kaynaklardan küçük bir OHLCV örneği indirmek.
-4. Açılış, high, kapanış, işlem görmeme ve düzeltilmiş fiyat alanlarının yeterliliğini kontrol etmek.
-5. Gerçek sütunlara göre `DATA_DICTIONARY.md` oluşturmak.
-6. Label üretim fonksiyonunu örnek veri üzerinde uygulamak ve birim testlerini yazmak.
-7. Veri kullanılabilirliği netleşince `FEATURE_CATALOG.md` oluşturmak.
-8. İlk model deneyi başladığında `EXPERIMENT_LOG.md` oluşturmak.
+1. Point-in-time tarihsel hisse evrenini kesinleştir.
+2. Kod değişiklikleri ve kot dışı hisselerin nasıl izleneceğini belirle.
+3. Tarihsel tavan fiyatı ve işlem yapılabilirlik yaklaşımını kesinleştir.
+4. Gerçek veri sütunlarına göre `DATA_DICTIONARY.md` hazırlamadan önce kaynak kabul testini tamamla.
+5. Daha sonra veri toplama koduna geç.
 
 ## Sonraki Ana Aşamalar
 
-1. Tarihsel veri başlangıcı ve point-in-time hisse evreni
+1. Point-in-time tarihsel hisse evreni
 2. Veri toplama ve temizleme
 3. Label üretim kodu ve testleri
 4. Feature engineering
@@ -89,7 +90,6 @@ Veri kaynakları kesinleştirildi. Mevcut görev tarihsel veri başlangıcının
 
 ## Açık Sorular
 
-- Tarihsel veri başlangıcı ne olacak?
 - Survivorship bias oluşturmayan tarihsel hisse evreni nasıl oluşturulacak?
 - Tarihsel tavan fiyatı nasıl belirlenecek?
 - İşlem durumu verisi gerekli olacak mı?
