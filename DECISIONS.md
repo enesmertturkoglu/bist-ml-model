@@ -477,6 +477,49 @@ Veri temizleme, işlem yapılabilirlik, label üretimi, backtest, veri kalite ra
 **Tarih:**
 2026-07-26
 
+### D023 — Özel İşlem Durumlarının KAP Olmadan Ele Alınması
+
+**Karar:**  
+İlk sürümde kurumsal işlem, ilk işlem günü ve serbest marj istisnalarının tespitinde KAP verisi kullanılmayacaktır.
+
+Kurumsal işlem tespitinde aşağıdaki ücretsiz mevcut kaynaklar kullanılacaktır:
+
+- yFinance temettü kayıtları
+- yFinance bölünme ve diğer action kayıtları
+- İş Yatırım ham ve düzeltilmiş fiyat serileri arasındaki düzeltme katsayısının değişimi
+
+`T+1`, `T+2` veya `T+3` günlerinden herhangi birinde kaynaklardan en az biri temettü, bölünme, bedelli, bedelsiz veya benzeri fiyat düzeltmesine yol açan kurumsal işlem işareti gösteriyorsa ilgili tahmin kaydı:
+
+- Negatif label yapılmayacaktır.
+- Model eğitim evreninden çıkarılacaktır.
+- Backtestte gerçekleşmiş işlem sayılmayacaktır.
+- `CORPORATE_ACTION_WINDOW` nedeni ile `NA` bırakılacaktır.
+
+Önceki geçerli İş Yatırım ham kapanış fiyatı bulunmuyorsa standart `%10` tavan hesabı uygulanmayacak ve kayıt `NO_PREVIOUS_CLOSE` veya `FIRST_TRADING_DAY_OR_NO_HISTORY` nedeniyle `NA` bırakılacaktır.
+
+Aşağıdaki durumlardan biri oluşursa kayıt standart dışı işlem durumu olarak kabul edilerek `NA` bırakılacaktır:
+
+- Ham açılış fiyatının hesaplanan üst fiyat limitinden yüksek olması
+- Günlük ham en yüksek fiyatın hesaplanan üst fiyat limitinden yüksek olması
+- Standart `%10` tavan hesabının güvenilir biçimde uygulanamaması
+
+Bu kayıtlar `SPECIAL_MARGIN_OR_CORPORATE_ACTION` durumuyla işaretlenecektir.
+
+İlk sürümde kapsamlı tarihsel serbest marj listesi oluşturulmayacaktır. Standart `%10` aralığında kalan ve mevcut iki kaynakla tespit edilemeyen serbest marj durumları bilinen veri sınırlaması olarak kabul edilecektir.
+
+KAP veya başka bir resmî metin kaynağı ilk sürümün zorunlu veri kaynağı olmayacaktır. KAP doğrulaması ancak daha sonraki geliştirme veya sorunlu kayıt inceleme aşamasında değerlendirilebilir.
+
+**Gerekçe:**  
+İlk sürümün sade, ücretsiz ve tekrarlanabilir kalması amaçlanmaktadır. İş Yatırım ile yFinance kurumsal işlemlerin önemli bölümünü tespit etmek için yeterli başlangıç sinyalleri sağlamaktadır.
+
+Belirsiz kayıtları normal işlem olarak kullanmak yerine `NA` bırakmak, kurumsal işlemlerden kaynaklanan yapay fiyat hareketlerinin label ve backtest sonuçlarını bozmasını sınırlar.
+
+**Etkilenen alanlar:**  
+Veri temizleme, kurumsal işlem tespiti, tavan hesabı, label üretimi, backtest ve veri kalite raporları.
+
+**Tarih:**  
+2026-07-26
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

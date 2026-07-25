@@ -4,9 +4,9 @@
 
 ## Mevcut Aşama
 
-Veri kaynakları, `2020-03-13` tarihsel başlangıcı, standart tavan açılış hesabı ve temel `T+1` işlem yapılabilirlik kuralları kesinleştirildi.
+Veri kaynakları, `2020-03-13` tarihsel başlangıcı, standart tavan açılış hesabı, temel `T+1` işlem yapılabilirlik kuralları ve özel işlem durumlarının ilk sürüm yaklaşımı kesinleştirildi.
 
-Mevcut görev ilk işlem günü, serbest marj ve kurumsal işlem istisnalarının veri kaynaklarıyla nasıl tespit edileceğinin belirlenmesidir.
+Sıradaki görev kaynak kabul testinin kapsamını oluşturmak ve gerçek veri sütunlarını doğrulamaktır.
 
 ## Tamamlananlar
 
@@ -62,6 +62,12 @@ Mevcut görev ilk işlem günü, serbest marj ve kurumsal işlem istisnalarını
 - İlk sürümde düşük fakat pozitif hacim nedeniyle otomatik hisse elemesi yapılmamasına karar verildi.
 - Likidite filtresinin temel giriş geçerliliğinden ayrılarak daha sonraki bir karar ve deney konusu olmasına karar verildi.
 - Tavan açılış, ilk işlem günü, serbest marj ve kurumsal işlem şüphesi bulunan kayıtların `NA` veya özel inceleme durumuna alınması kesinleştirildi.
+- İlk sürümde kurumsal işlem ve serbest marj kontrollerinde KAP kullanılmamasına karar verildi.
+- Kurumsal işlem tespitinde yFinance action kayıtları ile İş Yatırım ham/düzeltilmiş fiyat oranı değişimlerinin kullanılmasına karar verildi.
+- `T+1–T+3` penceresinde kurumsal işlem bulunan kayıtların `NA` bırakılması kesinleştirildi.
+- Önceki geçerli ham kapanışı bulunmayan kayıtların standart tavan hesabına alınmamasına karar verildi.
+- Açılış veya gün içi en yüksek fiyat hesaplanan üst fiyat limitini aşıyorsa kaydın standart dışı işlem durumu olarak `NA` bırakılması kararlaştırıldı.
+- İlk sürümde kapsamlı tarihsel serbest marj listesi oluşturulmamasına karar verildi.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -103,18 +109,17 @@ Mevcut görev ilk işlem günü, serbest marj ve kurumsal işlem istisnalarını
 
 ## Sıradaki Görevler
 
-1. İlk işlem günü kayıtlarının güvenilir biçimde nasıl tespit edileceğini belirle.
-2. Serbest marj uygulanan günlerin hangi veri kaynağıyla tespit edileceğini belirle.
-3. Temettü, bölünme, bedelli ve bedelsiz işlemlerin hangi İş Yatırım, yFinance, KAP veya Borsa İstanbul alanlarıyla tespit edileceğini belirle.
-4. İki hacim alanının da eksik olduğu kayıtların sıklığını veri kabul testinde ölç.
+1. İş Yatırım ve yFinance için kaynak kabul testi kapsamını oluştur.
+2. Örnek hisselerde ham ve düzeltilmiş fiyat katsayısı değişimlerini doğrula.
+3. yFinance temettü, split ve action alanlarının kullanılabilirliğini doğrula.
+4. İki hacim alanının da eksik olduğu kayıtların sıklığını ölç.
 5. Kod değiştiren hisselerin eşleme yöntemini veri kabul testiyle doğrula.
-6. Kaynak kabul testini tamamla.
-7. Gerçek veri sütunlarına göre `DATA_DICTIONARY.md` oluştur.
-8. Veri toplama koduna geç.
+6. Gerçek veri sütunlarına göre `DATA_DICTIONARY.md` oluştur.
+7. Veri toplama koduna geç.
 
 ## Sonraki Ana Aşamalar
 
-1. Tarihsel hisse evreni ve özel işlem durumu istisnaları
+1. Kaynak kabul testi ve gerçek veri sütunlarının doğrulanması
 2. Veri toplama ve temizleme
 3. Label üretim kodu ve testleri
 4. Feature engineering
@@ -127,9 +132,6 @@ Mevcut görev ilk işlem günü, serbest marj ve kurumsal işlem istisnalarını
 
 ## Açık Sorular
 
-- İlk işlem günü hangi veriyle güvenilir biçimde tespit edilecek?
-- Serbest marj uygulaması hangi veriyle tespit edilecek?
-- Kurumsal işlem günleri hangi kaynakların birleşimiyle tespit edilecek?
 - Açılış mevcutken iki hacim alanının da eksik olduğu kayıtlar nasıl ele alınacak?
 - Likidite filtresi nasıl belirlenecek?
 - Günlük kaç hisse seçilecek?
