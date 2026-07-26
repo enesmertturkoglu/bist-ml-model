@@ -1,0 +1,24 @@
+{
+  "clean_snapshot_checksum": "5997f85c712344249a649bf61a123fe5ebe26955515e438ea0b2182fd0f9873d",
+  "clean_snapshot_created": true,
+  "clean_snapshot_id": "snap_ee7c7dc789151cb6_r0003_d6c35384359f",
+  "summary": {
+    "CORPORATE_ACTION_WINDOW": 0,
+    "INVALID_OHLC": 0,
+    "LIMIT_OPEN": 0,
+    "NO_OPEN": 0,
+    "NO_PREVIOUS_CLOSE": 0,
+    "NO_TRADE": 0,
+    "PRICE_STEP_UNAVAILABLE": 6,
+    "SPECIAL_MARGIN_OR_CORPORATE_ACTION": 0,
+    "both_volumes_missing": 0,
+    "corporate_action_window": 0,
+    "cross_source_warning": 6,
+    "entry_eligible_false": 0,
+    "entry_eligible_true": 0,
+    "entry_eligible_unresolved": 6,
+    "one_volume_conflict": 0,
+    "requires_review": 6,
+    "row_count": 6
+  }
+}
