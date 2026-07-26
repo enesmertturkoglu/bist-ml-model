@@ -17,6 +17,11 @@ from src.data.snapshot_store import SnapshotRequest, SnapshotStore
 
 
 DATES = pd.date_range("2024-01-01", periods=6, freq="D")
+REFERENCE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "reference_data"
+    / "bist_equity_tick_sizes_v1.csv"
+)
 
 
 def _config(tmp_path: Path) -> MarketDataConfig:
@@ -178,6 +183,30 @@ def test_pipeline_records_input_ids_checksums_and_cleaning_identity(tmp_path: Pa
     assert len(row["input_snapshot_checksums"]) == 3
     assert row["cleaning_config_checksum"] == config.cleaning.checksum()
     assert row["cleaning_code_commit_sha"] == "c" * 40
+
+
+def test_pipeline_records_official_tick_rule_provenance(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    store = SnapshotStore(config)
+    inputs = _inputs(store)
+    price_steps = PriceStepTable.from_csv(REFERENCE_PATH)
+
+    result = MarketDataCleaningPipeline(
+        config,
+        snapshot_store=store,
+        code_commit_sha="d" * 40,
+    ).run([inputs], price_steps)
+    row = result.frame.iloc[0]
+    parameters = result.snapshot.metadata.request_parameters
+
+    assert row["tick_rule_set_id"] == "BIST_EQUITY_FROM_20231106_V1"
+    assert row["price_step_resolution_status"] == "RESOLVED"
+    assert "E-18454353-100.04.02-19412" in row["official_source_document"]
+    assert parameters["tick_rule_set_ids"] == [
+        "BIST_EQUITY_FROM_20231106_V1",
+        "BIST_EQUITY_PRE_20231106_V1",
+    ]
+    assert len(parameters["official_source_documents"]) == 1
 
 
 def test_pipeline_rejects_non_complete_input(tmp_path: Path) -> None:

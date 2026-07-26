@@ -172,11 +172,15 @@ class MarketDataCleaningPipeline:
                 "price_step_table_checksum": price_steps.checksum(
                     self.config.checksum_algorithm
                 ),
+                "tick_rule_set_ids": list(price_steps.rule_set_ids),
+                "official_source_documents": list(
+                    price_steps.official_source_documents
+                ),
                 "tickers": tickers,
                 "input_snapshot_ids": list(input_ids),
                 "input_snapshot_checksums": list(input_checksums),
             },
-            provider_library_version="derived-cleaning-v1",
+            provider_library_version="derived-cleaning-v2",
             code_commit_sha=self.code_commit_sha,
             layer="derived",
             input_snapshot_ids=input_ids,

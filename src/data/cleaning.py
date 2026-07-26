@@ -53,6 +53,15 @@ NON_FEATURE_AUDIT_COLUMNS = {
     "corporate_action_signal_sources",
     "input_snapshot_ids",
     "input_snapshot_checksums",
+    "raw_upper_limit",
+    "price_step",
+    "tick_size",
+    "tick_rule_set_id",
+    "tick_rule_effective_from",
+    "tick_rule_effective_to",
+    "estimated_upper_limit",
+    "price_step_resolution_status",
+    "official_source_document",
 }
 
 
@@ -524,8 +533,13 @@ def build_clean_eligibility_frame(
         lambda values: values.shift(1).ffill()
     )
     raw_limits: list[float | None] = []
-    steps: list[float | None] = []
+    tick_sizes: list[float | None] = []
     limits: list[float | None] = []
+    rule_set_ids: list[str | None] = []
+    rule_effective_from: list[str | None] = []
+    rule_effective_to: list[str | None] = []
+    resolution_statuses: list[str] = []
+    source_documents: list[str | None] = []
     for row in result[["date", "previous_nominal_close"]].itertuples(index=False):
         raw_limit = calculate_raw_upper_limit(
             row.previous_nominal_close,
@@ -536,13 +550,38 @@ def build_clean_eligibility_frame(
             row.date,
             price_steps,
             margin=settings.upper_limit_margin,
+            instrument_type=settings.instrument_type,
         )
-        raw_limits.append(calculation.raw_upper_limit if calculation else raw_limit)
-        steps.append(calculation.price_step if calculation else None)
-        limits.append(calculation.estimated_upper_limit if calculation else None)
+        raw_limits.append(
+            float(calculation.raw_upper_limit)
+            if calculation
+            else (float(raw_limit) if raw_limit is not None else None)
+        )
+        tick_sizes.append(float(calculation.tick_size) if calculation else None)
+        limits.append(float(calculation.estimated_upper_limit) if calculation else None)
+        rule_set_ids.append(calculation.rule_set_id if calculation else None)
+        rule_effective_from.append(
+            calculation.rule_effective_from.isoformat() if calculation else None
+        )
+        rule_effective_to.append(
+            calculation.rule_effective_to.isoformat()
+            if calculation and calculation.rule_effective_to
+            else None
+        )
+        resolution_statuses.append("RESOLVED" if calculation else "UNAVAILABLE")
+        source_documents.append(
+            calculation.official_source_document if calculation else None
+        )
     result["raw_upper_limit"] = raw_limits
-    result["price_step"] = steps
+    result["tick_size"] = tick_sizes
+    # Backward-compatible alias; ``tick_size`` is the canonical D026 field.
+    result["price_step"] = tick_sizes
+    result["tick_rule_set_id"] = rule_set_ids
+    result["tick_rule_effective_from"] = rule_effective_from
+    result["tick_rule_effective_to"] = rule_effective_to
     result["estimated_upper_limit"] = limits
+    result["price_step_resolution_status"] = resolution_statuses
+    result["official_source_document"] = source_documents
 
     daily_lookup = result.set_index(["ticker", "date"], drop=False)
     output_rows: list[dict[str, Any]] = []
@@ -614,7 +653,19 @@ def build_clean_eligibility_frame(
                     "previous_nominal_close": previous_close,
                     "raw_upper_limit": entry_row["raw_upper_limit"],
                     "price_step": entry_row["price_step"],
+                    "tick_size": entry_row["tick_size"],
+                    "tick_rule_set_id": entry_row["tick_rule_set_id"],
+                    "tick_rule_effective_from": entry_row[
+                        "tick_rule_effective_from"
+                    ],
+                    "tick_rule_effective_to": entry_row["tick_rule_effective_to"],
                     "estimated_upper_limit": estimated_limit,
+                    "price_step_resolution_status": entry_row[
+                        "price_step_resolution_status"
+                    ],
+                    "official_source_document": entry_row[
+                        "official_source_document"
+                    ],
                     "ohlc_quality_flag": entry_row["ohlc_quality_flag"],
                     "volume_quality_flag": entry_row["volume_quality_flag"],
                     "cross_source_price_warning": entry_row["cross_source_price_warning"],
@@ -684,6 +735,16 @@ def summarize_cleaning(frame: pd.DataFrame) -> dict[str, Any]:
         ),
         "PRICE_STEP_UNAVAILABLE": int(
             all_reasons.eq("PRICE_STEP_UNAVAILABLE").sum()
+        ),
+        "price_step_resolution_resolved": int(
+            frame.get("price_step_resolution_status", pd.Series(dtype="string"))
+            .eq("RESOLVED")
+            .sum()
+        ),
+        "price_step_resolution_unavailable": int(
+            frame.get("price_step_resolution_status", pd.Series(dtype="string"))
+            .eq("UNAVAILABLE")
+            .sum()
         ),
         "both_volumes_missing": int(
             frame.get("volume_quality_flag", pd.Series(dtype="string"))

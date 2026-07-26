@@ -33,9 +33,10 @@ class ProviderRequestConfig:
 
 @dataclass(frozen=True)
 class CleaningConfig:
-    """D022/D023 rules that must be stable and auditable across cleaning runs."""
+    """D022/D023/D026 rules stable across auditable cleaning runs."""
 
-    upper_limit_margin: float = 0.10
+    upper_limit_margin: str = "0.10"
+    instrument_type: str = "EQUITY"
     limit_price_relative_tolerance: float = 1e-12
     limit_price_absolute_tolerance: float = 1e-8
     adjustment_factor_relative_tolerance: float = 1e-4
@@ -43,7 +44,7 @@ class CleaningConfig:
     cross_source_price_absolute_tolerance: float = 1e-8
     corporate_action_horizon_days: int = 3
     clean_dataset_type: str = "market_data_eligibility"
-    cleaning_version: str = "d022-d023-v1"
+    cleaning_version: str = "d022-d023-tick-size-v2"
     reason_priority: tuple[str, ...] = (
         "NO_OPEN",
         "NO_TRADE",
@@ -73,6 +74,9 @@ class MarketDataConfig:
 
     data_root: Path = Path("data")
     operational_cache_root: Path = Path(".cache/market_data")
+    tick_size_reference_path: Path = Path(
+        "reference_data/bist_equity_tick_sizes_v1.csv"
+    )
     raw_directory_name: str = "raw"
     derived_directory_name: str = "derived"
     manifest_directory_name: str = "manifests"

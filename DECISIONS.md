@@ -652,6 +652,58 @@ Veri snapshot ve checksum yapısı, merkezi config, label uygunluğu, feature ş
 **Tarih:**
 2026-07-26
 
+### D026 — Tarih-Etkin BİST Pay Piyasası Fiyat Adımı Tarifeleri
+
+**Karar:**
+Standart şirket paylarının fiyat adımı, repoda sürümlenen ve resmî Borsa İstanbul kaynağına bağlanan `reference_data/bist_equity_tick_sizes_v1.csv` tablosundan `entry_date`, `instrument_type=EQUITY` ve fiyat adımına yuvarlanmamış üst limit fiyatı ile çözümlenecektir.
+
+Kaynak, Borsa İstanbul'un `28.08.2023` tarihli ve `E-18454353-100.04.02-19412` sayılı “Pay Piyasası ve Vadeli İşlem ve Opsiyon Piyasası İşleyiş Esaslarında Yapılan Değişiklikler” duyurusudur. Duyurunun “ESKİ METİN” tablosu önceki dört kademeyi, “YENİ METİN” tablosu sekiz kademeyi ve duyuru metni yeni tarifenin `06.11.2023` yürürlük tarihini doğrular. İndirilen resmî PDF'nin SHA-256 özeti `cb0a1e0091d799186e9ae67b7badc8483f2166d9b66ed03c7bd55e205a0702d3` olarak kaydedilmiştir.
+
+Proje kapsamındaki tarih-etkin rejimler:
+
+| Rejim | Geçerlilik | Fiyat bandı (alt dahil, üst hariç) | Fiyat adımı |
+| --- | --- | --- | --- |
+| `BIST_EQUITY_PRE_20231106_V1` | `2020-03-13`–`2023-11-05` | `[0.01, 20)` | `0.01 TRY` |
+|  |  | `[20, 50)` | `0.02 TRY` |
+|  |  | `[50, 100)` | `0.05 TRY` |
+|  |  | `[100, ∞)` | `0.10 TRY` |
+| `BIST_EQUITY_FROM_20231106_V1` | `2023-11-06` ve sonrası | `[0.01, 20)` | `0.01 TRY` |
+|  |  | `[20, 50)` | `0.02 TRY` |
+|  |  | `[50, 100)` | `0.05 TRY` |
+|  |  | `[100, 250)` | `0.10 TRY` |
+|  |  | `[250, 500)` | `0.25 TRY` |
+|  |  | `[500, 1000)` | `0.50 TRY` |
+|  |  | `[1000, 2500)` | `1.00 TRY` |
+|  |  | `[2500, ∞)` | `2.50 TRY` |
+
+İlk rejimin `2020-03-13` başlangıcı tarifenin ilk kez yürürlüğe girdiği tarih iddiası değildir; projenin D020 ile kesinleşmiş model dönemi başlangıcıdır. Resmî 2023 belgesi dört kademeyi değişiklik öncesindeki “eski metin” olarak doğrular. Bu kapsam ayrımı referans tablosunun `notes` alanında da korunacaktır.
+
+Standart üst limit hesabı aşağıdaki sırayla yapılacaktır:
+
+```text
+base_price = previous_valid_yf_nominal_close
+raw_upper_limit = base_price × Decimal("1.10")
+tick_rule = tariff.resolve(entry_date, "EQUITY", raw_upper_limit)
+estimated_upper_limit = floor(raw_upper_limit / tick_size) × tick_size
+```
+
+Para ve fiyat adımı hesaplarında ikili kayan nokta aritmetiği kullanılmayacaktır. Sağlayıcı değerleri `Decimal(str(value))` ile hesap sınırında dönüştürülecek; `raw_upper_limit`, fiyat bandı seçimi ve içeri/aşağı yuvarlama `Decimal` ile yapılacaktır. Kayan nokta yalnız sağlayıcı/çıktı sınırında ve mevcut küçük karşılaştırma toleranslarında kullanılabilir; bir tam fiyat adımı tolerans değildir.
+
+Tablo; kural seti, enstrüman türü, tarih aralığı, alt/üst fiyat sınırları, fiyat adımı, para birimi, resmî kurum/belge/tarih/yürürlük/URL, kaynak checksum'u ve açıklama alanlarını taşır. Her rejimde fiyat bantları boşluksuz ve çakışmasız, rejimler arasında tarihler ardışık olmalıdır. Gelecekteki değişiklikler mevcut satırların üzerine yazılmadan yeni `rule_set_id` ve tarih aralığıyla eklenecektir.
+
+Tarih, fiyat veya enstrüman türü için tek bir kural çözülemiyorsa tarife tahmin edilmeyecek; `price_step_resolution_status=UNAVAILABLE`, `PRICE_STEP_UNAVAILABLE`, `requires_review=true` ve uygun olduğunda `entry_eligible=NA` davranışı korunacaktır. Pay dışındaki araçlar bu `EQUITY` tarifesini kullanamaz.
+
+İş Yatırım fiyatları tavan hesabına alınmayacaktır. Baz fiyat yalnız önceki geçerli `yf_nominal_close`; karşılaştırılan açılış ve yüksek değerleri yalnız yFinance nominal OHLC olacaktır. Fiyat adımı ve tavan alanları işlem uygunluğu/denetim alanıdır, model feature'ı değildir.
+
+**Gerekçe:**
+Tarih-etkin, kaynak kimliği ve checksum'u kaydedilmiş bir tarife; üst limit hesabını tekrar üretilebilir kılar, 2023 değişikliğini doğru günde uygular ve doğrulanmamış sabit fiyat adımı kullanımını önler. `Decimal` kullanımı sınır değerlerinde ikili kayan noktanın yanlış fiyat bandı veya yanlış aşağı yuvarlama üretmesi riskini kaldırır.
+
+**Etkilenen alanlar:**
+Referans veri, merkezi config, tavan hesabı, D022 işlem uygunluğu temizlemesi, snapshot provenance alanları, durum raporları, veri sözlüğü ve birim testleri. Label, feature, model, tahmin ve backtest kapsamı değiştirilmemiştir.
+
+**Tarih:**
+2026-07-26
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

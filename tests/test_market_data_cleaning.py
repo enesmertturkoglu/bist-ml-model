@@ -182,8 +182,8 @@ def test_upper_limit_uses_ten_percent_and_inward_floor() -> None:
     result = calculate_upper_limit(1.133, "2024-01-02", _price_steps())
 
     assert result is not None
-    assert result.raw_upper_limit == pytest.approx(1.2463)
-    assert result.estimated_upper_limit == 1.24
+    assert result.raw_upper_limit == Decimal("1.2463")
+    assert result.estimated_upper_limit == Decimal("1.24")
 
 
 def test_floor_to_price_step_uses_decimal_arithmetic() -> None:
@@ -322,6 +322,16 @@ def test_missing_price_step_rule_is_explicit_review_not_guess() -> None:
     assert row["entry_exclusion_reason"] == "PRICE_STEP_UNAVAILABLE"
     assert row["raw_upper_limit"] == 11.0
     assert pd.isna(row["estimated_upper_limit"])
+    assert row["price_step_resolution_status"] == "UNAVAILABLE"
+
+
+def test_resolved_price_step_metadata_is_retained() -> None:
+    row = _clean().iloc[0]
+
+    assert row["tick_size"] == row["price_step"] == 0.01
+    assert row["tick_rule_set_id"] == "UNVERSIONED"
+    assert row["tick_rule_effective_from"] == "2020-01-01"
+    assert row["price_step_resolution_status"] == "RESOLVED"
 
 
 def test_price_step_table_rejects_ambiguous_rules() -> None:

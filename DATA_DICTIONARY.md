@@ -138,7 +138,31 @@ yFinance çağrıları `.IS` uzantılı semboller, `auto_adjust=False` ve `actio
 | `is_tl_volume` | İş Yatırım `HGDG_HACIM` | Ham/sağlayıcı hacmi | Kaynak değeri | `float64` | D022 TL işlem hacmi ve kalite kontrolü | Gün kapanışından sonra | `yf_share_volume` ile işlem gerçekleşme kontrolü | İki hacim eksikse açık soru; ikisi sıfırsa `NO_TRADE` | Negatiflik, sıfır/eksik ve `SOURCE_VOLUME_CONFLICT` |
 | `cross_source_price_warning` | yFinance nominal + İş Yatırım `HG_*` | Türetilmiş kalite bayrağı | Karşılaştırılabilir nominal/İş Yatırım high-low-close alanlarından en az biri yalnız sayısal toleransı aşarsa `true` | `boolean` | Fiyat kaynakları çapraz veri kalite raporu | İlgili gün sonrasında; model feature'ı değildir | Satırı otomatik dışlamaz, kabul sonucunu etkilemez | Karşılaştırma yapılamıyorsa `NA` | Fark alanları ve sayısal tolerans raporlanır; sabit yüzde kabul eşiği yoktur |
 
-## D022/D023 Temiz Snapshot Alanları
+## D026 Fiyat Adımı Referans Verisi
+
+`reference_data/bist_equity_tick_sizes_v1.csv`, Borsa İstanbul'un `E-18454353-100.04.02-19412` sayılı resmî duyurusundaki pay fiyat adımlarını tarih-etkin ve eklemeli biçimde saklar. Fiyat bantları alt sınırı dahil, üst sınırı hariçtir. Son bandın `price_max_exclusive` değeri boştur ve sonsuz üst sınırı ifade eder.
+
+| Alan | Anlam |
+| --- | --- |
+| `rule_set_id` | Değişmez tarife rejimi kimliği |
+| `instrument_type` | Tarifenin araç türü; bu dosyada yalnız `EQUITY` |
+| `effective_from` | Rejim başlangıcı, dahil |
+| `effective_to` | Rejim sonu, dahil; boşsa açık uçlu |
+| `price_min_inclusive` | Fiyat bandının dahil alt sınırı |
+| `price_max_exclusive` | Fiyat bandının hariç üst sınırı; boşsa açık uçlu |
+| `tick_size` | İlgili fiyat bandının TRY fiyat adımı |
+| `currency` | `TRY` |
+| `official_source_name` | Resmî kurum; `Borsa İstanbul` |
+| `official_document_number` | `E-18454353-100.04.02-19412` |
+| `official_document_date` | Belge tarihi; `2023-08-28` |
+| `official_effective_date` | Belgede belirtilen değişiklik yürürlük tarihi; `2023-11-06` |
+| `official_source_url` | Resmî PDF adresi |
+| `source_checksum` | Doğrulanan PDF'nin SHA-256 özeti |
+| `notes` | Kaynak yorumu ve kapsam sınırı; eski rejimin `2020-03-13` başlangıcının proje model dönemi başlangıcı olduğu burada açıklanır |
+
+Referans tablosu yüklenirken her rejimin `[0.01, ∞)` fiyat aralığını boşluksuz/çakışmasız kapattığı, tarih rejimlerinin ardışık olduğu, resmî kaynak metadata'sının tam bulunduğu ve checksum biçiminin SHA-256 olduğu doğrulanır. Bilinmeyen tarih veya pay dışı araç için kural döndürülmez.
+
+## D022/D023/D026 Temiz Snapshot Alanları
 
 `cleaning/market_data_eligibility` yalnız fiziksel checksum'ı doğrulanan `COMPLETE` İş Yatırım raw, yFinance raw ve ilgili yFinance raw snapshot ID'sini `input_snapshot_ids` içinde taşıyan `yfinance/nominal_ohlc` snapshot'larından üretilir. Ana takvim, TL hacmi, kurumsal aksiyon sinyali ve fiyat kalite karşılaştırması İş Yatırım'dan; fiyat bağımlı bütün hesaplar yalnız yFinance nominal OHLC'den gelir. Ham snapshot'lar değiştirilmez.
 
@@ -157,9 +181,15 @@ Temiz snapshot tarihsel uygunluk datasetidir. `prediction_date=T` satırında `e
 | `is_tl_volume` | İş Yatırım `HGDG_HACIM` | T+1 TL hacmi; yFinance hacmiyle birlikte D022 kontrolü | T kapanışında bilinmez; feature değildir |
 | `yf_share_volume` | yFinance `Volume` | T+1 adet hacmi; İş Yatırım hacmiyle birlikte D022 kontrolü | T kapanışında bilinmez; feature değildir |
 | `previous_nominal_close` | Giriş gününden önceki son geçerli `yf_nominal_close` | Standart tavan baz fiyatı; bulunamazsa `NO_PREVIOUS_CLOSE` | T+1 için normalde T kapanışında bilinir; yalnız tavan/uygunluk hesabıdır |
-| `raw_upper_limit` | `previous_nominal_close × 1.10` | Fiyat adımına yuvarlanmamış standart üst limit | Model feature'ı değildir |
-| `price_step` | Dışarıdan verilen doğrulanmış tarih-etkin fiyat adımı tablosu | İlgili tarih/fiyat bandının adımı; kural yoksa `NA` | Doğrulanmış tarife olmadan tahmin edilmez |
-| `estimated_upper_limit` | `raw_upper_limit` değerinin `price_step` katına içeri/aşağı yuvarlanması | Standart adi pay tahmini tavanı | Yalnız giriş uygunluğu kontrolü; feature değildir |
+| `raw_upper_limit` | `Decimal(str(previous_nominal_close)) × Decimal("1.10")` | Fiyat adımına yuvarlanmamış standart üst limit | Model feature'ı değildir |
+| `tick_size` | D026 tarih-etkin `EQUITY` referans tablosu | `entry_date` ve `raw_upper_limit` için çözülen TRY fiyat adımı; kural yoksa `NA` | Yalnız işlem uygunluğu; feature değildir |
+| `price_step` | `tick_size` | Geriye uyumluluk için aynı değeri taşıyan eski alan adı | Feature değildir |
+| `tick_rule_set_id` | D026 referans tablosu | Çözülen değişmez rejim kimliği; kural yoksa `NA` | Lineage/denetim; feature değildir |
+| `tick_rule_effective_from` | D026 referans tablosu | Çözülen rejimin dahil başlangıç tarihi | Denetim; feature değildir |
+| `tick_rule_effective_to` | D026 referans tablosu | Çözülen rejimin dahil son tarihi; açık uçluysa `NA` | Denetim; feature değildir |
+| `estimated_upper_limit` | `raw_upper_limit` değerinin `tick_size` katına `Decimal` ile içeri/aşağı yuvarlanması | Standart adi pay tahmini tavanı | Yalnız giriş uygunluğu kontrolü; feature değildir |
+| `price_step_resolution_status` | Tarife çözümlemesi | `RESOLVED` veya `UNAVAILABLE` | Denetim; feature değildir |
+| `official_source_document` | Çözülen D026 kuralı | Borsa İstanbul kurum, belge numarası ve belge tarihi | Lineage/denetim; feature değildir |
 | `ohlc_quality_flag` | yFinance nominal OHLC | `VALID`, `NO_OPEN` veya `INVALID_OHLC` | T+1 sonucu; feature değildir |
 | `volume_quality_flag` | İki bağımsız hacim kaynağı | Hacim kanıtı/uyuşmazlığı/çözümsüzlük durumu | T+1 sonucu; feature değildir; düşük pozitif hacim eşiği yoktur |
 | `cross_source_price_warning` | yFinance nominal high/low/close ile İş Yatırım raw high/low/close karşılaştırması | Yalnız kalite uyarısı; satırı dışlamaz ve fiyatları birleştirmez | Model feature'ı değildir |
@@ -199,7 +229,7 @@ Ana neden önceliği yalnız raporlama içindir; bütün nedenler `entry_exclusi
 | `SOURCE_VOLUME_CONFLICT` | Bir hacim pozitifken diğeri sıfır veya eksik | Dışlamaz; kalite uyarısı |
 | `POSITIVE_VOLUME_CONFIRMED` | En az bir pozitif hacim var ve kaynak çatışması yok | Hacim nedeniyle dışlamaz |
 
-`LIMIT_OPEN` eşitliğinde `rtol=1e-12`, `atol=1e-8` yalnız kayan nokta gürültüsü içindir; bir tam fiyat adımı tolerans olarak kullanılmaz. Repo doğrulanmış tarihsel fiyat adımı tarifesi gömmez. Tarife verilmezse `price_step` ve `estimated_upper_limit` `NA` kalır.
+`LIMIT_OPEN` eşitliğinde `rtol=1e-12`, `atol=1e-8` yalnız sağlayıcı/çıktı sınırındaki kayan nokta gürültüsü içindir; bir tam fiyat adımı tolerans olarak kullanılmaz. Para, band seçimi ve fiyat adımına yuvarlama hesapları `Decimal` ile yapılır. D026 tablosunda tarih/fiyat/enstrüman için kural yoksa `tick_size`, `price_step`, kural metadata'sı ve `estimated_upper_limit` `NA` kalır; durum `UNAVAILABLE` olarak kaydedilir.
 
 ## Kabul Testinde Üretilen Türetilmiş Alanlar
 

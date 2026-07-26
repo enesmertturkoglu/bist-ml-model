@@ -4,11 +4,11 @@
 
 ## Mevcut Aşama
 
-D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu altyapısı tamamlandı.
+D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu altyapısı ile D026 resmî, tarih-etkin BİST pay fiyat adımı entegrasyonu tamamlandı.
 
 İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. İki kaynağın ham verileri birbirinden bağımsız `raw` snapshot'larda; yFinance nominal OHLC ise kaynak snapshot kimliğine bağlı ayrı `derived` katmanda saklanır. Canonical checksum, atomik yazma, manifest doğrulaması ve revision fark raporu eski snapshot'ların üzerine yazılmasını önler.
 
-`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul, snapshot/revision ve D022/D023 temizleme aşamaları tamamlandı. Sıradaki görev temiz snapshot'lardan label üretim koduna geçilmesidir.
+`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul, snapshot/revision, D022/D023 temizleme ve D026 fiyat adımı aşamaları tamamlandı. Sıradaki görev temiz snapshot'lardan label üretim koduna geçilmesidir.
 
 ## Tamamlananlar
 
@@ -127,9 +127,11 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu altyapısı tama
 - Temizleme yalnız manifestteki, fiziksel checksum doğrulamasından geçen `COMPLETE` İş Yatırım raw, yFinance raw ve kaynak raw ID'sine bağlı yFinance nominal snapshot'larını kabul eder; ham snapshot'ları değiştirmeden yeni `derived/cleaning/market_data_eligibility` snapshot'ı üretir.
 - OHLC için `NO_OPEN`/`INVALID_OHLC`; hacim için `NO_TRADE`, `SOURCE_VOLUME_CONFLICT` ve çözümsüz `BOTH_VOLUMES_MISSING_UNRESOLVED`; tavan için `NO_PREVIOUS_CLOSE`, `LIMIT_OPEN`, `SPECIAL_MARGIN_OR_CORPORATE_ACTION` ve `PRICE_STEP_UNAVAILABLE`; kurumsal aksiyon için `CORPORATE_ACTION_WINDOW` durumları deterministik ana neden ve tam neden listesiyle üretildi.
 - `T+1–T+3` kurumsal aksiyon penceresi ticker satır sırasına göre değil, global İş Yatırım BİST takvimindeki ardışık günlere göre kuruldu; action ve gelecekteki split/audit alanlarının model feature'ı olmadığı kod ve sözlükte açıklandı.
-- Doğrulanmış tarihsel fiyat adımı tarifesi repoda bulunmadığı için hiçbir sabit tarife uydurulmadı. Temizleme dışarıdan verilen tarih-etkin tabloyu kullanır; tablo/rule yoksa `price_step` ile `estimated_upper_limit` boş kalır, `entry_eligible=NA` ve `requires_review=true` üretilir.
-- D022/D023 için 40 saf kural ve 9 snapshot/pipeline testi eklendi; mevcutlarla birlikte toplam 109 test geçti. Yeniden çalıştırılan 10 hisselik gerçek kaynak kabulü `PASS` verdi.
-- THYAO `2024-01-02`–`2024-01-12` küçük gerçek veri koşusunda 9 satırlık üç kaynak snapshot'ı `COMPLETE` doğrulandı ve 6 satırlık temiz snapshot üretildi. Fiyat adımı tarifesi verilmediğinden 6 kaydın tamamı `PRICE_STEP_UNAVAILABLE`/`requires_review`; OHLC/hacim/action dışlaması `0`, satırı dışlamayan çapraz kaynak uyarısı `6` oldu. İlk sandbox denemesindeki iki `FAILED` snapshot yalnız denetim izidir ve temizlemeye alınmadı.
+- Borsa İstanbul'un `E-18454353-100.04.02-19412` sayılı resmî duyurusundaki eski/yeni pay fiyat adımı metinleri ve `2023-11-06` yürürlük tarihi PDF metni ile görsel tablo üzerinden doğrulandı; kaynak SHA-256 özetiyle birlikte `reference_data/bist_equity_tick_sizes_v1.csv` dosyasında sürümlendi.
+- D026 ile `2020-03-13`–`2023-11-05` dört kademeli ve `2023-11-06` sonrası sekiz kademeli `EQUITY` rejimleri eklendi. İlk tarih resmî başlangıç iddiası değil, projenin model dönemi kapsam sınırıdır. Bantlar alt dahil/üst hariçtir; eksik, çakışan veya boşluklu referans veri yüklenmez.
+- Tavan hesabı `previous_valid_yf_nominal_close × Decimal("1.10")`, `entry_date + EQUITY + raw_upper_limit` kural çözümü ve `Decimal` ile içeri/aşağı yuvarlama sırasına bağlandı. Çözülen kural kimliği, tarih aralığı, fiyat adımı, çözüm durumu ve resmî belge temiz snapshot'ta saklanır; kural yoksa mevcut açık inceleme davranışı korunur.
+- Fiyat adımı sınırları, rejim geçişleri, boşluk/çakışma, bilinmeyen tarih/enstrüman, `Decimal` deterministikliği ve temizleme entegrasyonuyla birlikte toplam 153 birim test geçti. Yeniden çalıştırılan 10 hisselik gerçek kaynak kabulü `PASS` verdi.
+- THYAO `2024-01-02`–`2024-01-12` üç kaynak snapshot setinin D026 tarifesiyle gerçek temizleme tekrar koşusu, kod commit'inden sonra üretilecek ve aşağıdaki raporlara kaydedilecektir.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -172,8 +174,7 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu altyapısı tama
 ## Sıradaki Görevler
 
 1. Temiz ve uygunluk durumu kesinleşmiş snapshot'lardan label üretim kodunu ve testlerini oluştur.
-2. Resmi kaynağı doğrulanmış tarih-etkin BİST fiyat adımı tablosunu sisteme vererek tavan durumlarını gerçek veride tamamla.
-3. Kod değiştiren hisselerin eşlemesini test et.
+2. Kod değiştiren hisselerin eşlemesini test et.
 
 ## Sonraki Ana Aşamalar
 
@@ -189,7 +190,6 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu altyapısı tama
 
 ## Açık Sorular
 
-- Doğrulanmış tarihsel BİST fiyat adımı tarifesi hangi resmi veri kaynağından ve hangi sürümleme süreciyle alınacak?
 - Likidite filtresi nasıl belirlenecek?
 - Günlük kaç hisse seçilecek?
 - Komisyon ve slippage varsayımları ne olacak?

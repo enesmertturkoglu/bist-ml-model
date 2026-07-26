@@ -43,8 +43,8 @@ def _parser() -> argparse.ArgumentParser:
         "--price-step-table",
         type=Path,
         help=(
-            "verified CSV with effective_from,effective_to,min_price,max_price,price_step; "
-            "when omitted no tariff is guessed and applicable rows require review"
+            "versioned official tick-size CSV; defaults to the centrally configured "
+            "BIST equity reference file"
         ),
     )
     parser.add_argument("--data-root", type=Path, default=Path("data"))
@@ -58,11 +58,12 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _parser().parse_args()
     config = replace(MarketDataConfig(), data_root=args.data_root)
-    price_steps = (
-        PriceStepTable.from_csv(args.price_step_table)
+    reference_path = (
+        args.price_step_table
         if args.price_step_table is not None
-        else PriceStepTable()
+        else PROJECT_ROOT / config.tick_size_reference_path
     )
+    price_steps = PriceStepTable.from_csv(reference_path)
     pipeline = MarketDataCleaningPipeline(
         config,
         code_commit_sha=current_code_commit_sha(PROJECT_ROOT),
@@ -87,6 +88,7 @@ def main() -> int:
     )
     result.exception_examples.to_csv(exceptions_path, index=False)
     print(json.dumps(summary_payload, ensure_ascii=False, sort_keys=True))
+    print(f"tick_size_reference={reference_path}")
     print(f"summary_report={summary_path}")
     print(f"exception_report={exceptions_path}")
     return 0
