@@ -145,6 +145,8 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Mapping sürümü/checksum'u identity, clean ve label metadata'sına bağlandı. Aynı input/mapping idempotenttir; mapping değişikliği eski snapshot'ı değiştirmeden yeni derived snapshot üretir.
 - Mapping bulunmayan yeni halka arz benzeri kısa seri kabul edilir. Mapping güncel değilken kod değiştiren bir pay geçici olarak ayrı security olabilir; mapping düzeltildikten sonra veri yeniden hazırlanmalı ve model yeniden eğitilmelidir.
 - Kısa Türkçe işletim belgesi `SECURITY_MAPPING_AND_TRAINING_DATA.md` eklendi.
+- Resolver, geçerlilik/çakışma, otomatik ID, provider dönem planı, mükerrer önceliği, snapshot checksum/revision/idempotence ve eski-yeni dönemin clean/label boyunca tek security kalmasını kapsayan 24 identity testi eklendi; tüm regresyon paketi 219 testle geçti.
+- Gerçek THYAO nominal snapshot'ı `snap_86bf32995854f483_r0001_e3137169a75f`, `224a718` kod commit'i ve boş doğrulanmış mapping v1 ile işlendi. `2024-01-02`–`2024-01-12` arasındaki 9 satır `SEC_444a261b8b9b` altında, `observed_ticker=THYAO` ve `AUTO_NEW_TICKER=9` dağılımıyla `COMPLETE` `snap_8ff782f3b81f315b_r0001_deceac87a850` snapshot'ına yazıldı. İçerik checksum'u `5529de13f8864d4b82e66b6ba114ebbd6281b82c479c85407b62529928d7a3e9`, mapping checksum'u `400935abc55b923b36004ee8407972fbd69dd39d59f95a970ad7577158d46819` olarak doğrulandı; ikinci koşu aynı snapshot'ı `created=false` döndürdü.
 
 ## Kesinleşen Başlangıç Senaryosu
 

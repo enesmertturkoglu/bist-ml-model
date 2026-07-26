@@ -1,0 +1,15 @@
+{
+  "security_identity_snapshot_checksum": "5529de13f8864d4b82e66b6ba114ebbd6281b82c479c85407b62529928d7a3e9",
+  "security_identity_snapshot_created": false,
+  "security_identity_snapshot_id": "snap_8ff782f3b81f315b_r0001_deceac87a850",
+  "summary": {
+    "mapping_status_counts": {
+      "AUTO_NEW_TICKER": 9
+    },
+    "observed_ticker_count": 1,
+    "row_count": 9,
+    "security_count": 1,
+    "ticker_mapping_checksum": "400935abc55b923b36004ee8407972fbd69dd39d59f95a970ad7577158d46819",
+    "ticker_mapping_version": "bist_security_ticker_map_v1"
+  }
+}
