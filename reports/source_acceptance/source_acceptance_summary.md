@@ -2,7 +2,7 @@
 
 **Çalıştırma tarihi:** 2026-07-26
 
-**Üretim zamanı:** 2026-07-26T14:45:37+03:00
+**Üretim zamanı:** 2026-07-26T23:05:31+03:00
 
 **Kaynak kabul sonucu:** `PASS`
 
@@ -57,13 +57,13 @@ Bu kabul çalıştırıcısı ham yanıtları repoya yazmaz. D024'ün gerektirdi
 - Gerçek retry sayısı: **0**
 - Minimum parça: **3 ay**
 - İstekler arası temel gecikme: **1 saniye + jitter**
-- Yıllık çağrı sayısı: **70**
+- Yıllık çağrı sayısı: **0**
 - Altı aylık çağrı sayısı: **0**
 - Üç aylık çağrı sayısı: **0**
 - Altı aylığa bölünen parça sayısı: **0**
 - Üç aylığa bölünen parça sayısı: **0**
-- Cache hit sayısı: **0**
-- Gerçek ağ isteği sayısı: **70**
+- Cache hit sayısı: **70**
+- Gerçek ağ isteği sayısı: **0**
 - Timeout sayısı: **0**
 - Timeout sonrasında başarıya ulaşan parça sayısı: **0**
 - Tamamen başarısız kalan minimum parça sayısı: **0**

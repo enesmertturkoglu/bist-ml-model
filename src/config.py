@@ -1,4 +1,4 @@
-"""Central configuration for market-data collection and snapshot storage."""
+"""Central configuration for market-data collection, cleaning and storage."""
 
 from __future__ import annotations
 
@@ -32,6 +32,42 @@ class ProviderRequestConfig:
 
 
 @dataclass(frozen=True)
+class CleaningConfig:
+    """D022/D023 rules that must be stable and auditable across cleaning runs."""
+
+    upper_limit_margin: float = 0.10
+    limit_price_relative_tolerance: float = 1e-12
+    limit_price_absolute_tolerance: float = 1e-8
+    adjustment_factor_relative_tolerance: float = 1e-4
+    adjustment_factor_absolute_tolerance: float = 5e-5
+    cross_source_price_absolute_tolerance: float = 1e-8
+    corporate_action_horizon_days: int = 3
+    clean_dataset_type: str = "market_data_eligibility"
+    cleaning_version: str = "d022-d023-v1"
+    reason_priority: tuple[str, ...] = (
+        "NO_OPEN",
+        "NO_TRADE",
+        "INVALID_OHLC",
+        "NO_PREVIOUS_CLOSE",
+        "SPECIAL_MARGIN_OR_CORPORATE_ACTION",
+        "LIMIT_OPEN",
+        "CORPORATE_ACTION_WINDOW",
+        "PRICE_STEP_UNAVAILABLE",
+    )
+
+    def checksum(self, algorithm: str = "sha256") -> str:
+        """Return a stable checksum of the effective cleaning contract."""
+
+        encoded = json.dumps(
+            _json_ready(asdict(self)),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.new(algorithm, encoded).hexdigest()
+
+
+@dataclass(frozen=True)
 class MarketDataConfig:
     """Filesystem, date, checksum and provider settings for data collection."""
 
@@ -48,6 +84,7 @@ class MarketDataConfig:
     warmup_start_date: date | None = None
     checksum_algorithm: str = "sha256"
     snapshot_statuses: tuple[str, ...] = tuple(status.value for status in SnapshotStatus)
+    cleaning: CleaningConfig = field(default_factory=CleaningConfig)
     isyatirim: ProviderRequestConfig = field(
         default_factory=lambda: ProviderRequestConfig(
             timeout_seconds=60.0,

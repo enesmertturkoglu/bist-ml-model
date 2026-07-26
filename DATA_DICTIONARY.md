@@ -22,7 +22,7 @@ data/
 ```
 
 - `raw`: Sağlayıcı alanları ve değerleri değiştirilmeden saklanır. yFinance tarih indeksi yalnız serializasyon için yerel `date` sütununa taşınır ve istek tickera `ticker` kimliği eklenir. İş Yatırım'ın kabul edilmiş yardımcı alanları aynı ham frame içinde korunur.
-- `derived`: Ham veriyle karışmayan dönüşüm çıktılarıdır. İlk oluşturulan dataset `yfinance/nominal_ohlc` olup D024 nominal OHLC ve split-normalizasyon denetim alanlarını içerir; kaynak ham snapshot `input_snapshot_ids` ile bağlanır.
+- `derived`: Ham veriyle karışmayan dönüşüm çıktılarıdır. `yfinance/nominal_ohlc` D024 nominal OHLC ve split-normalizasyon denetim alanlarını; `cleaning/market_data_eligibility` D022/D023 temizleme, kalite ve işlem uygunluğu alanlarını içerir. Her türetilmiş snapshot kaynak ham/türetilmiş snapshot'larına `input_snapshot_ids` ile bağlanır.
 - `manifests`: Commit edilmiş snapshot kayıtları ile gerçek sağlayıcı revision farklarını tutar. Geçici `.snapshot-tmp-*` dosya veya dizinleri manifest kaydı olmadan geçerli snapshot sayılmaz.
 
 Snapshot verileri ek bir Parquet bağımlılığı gerektirmeyen `canonical-jsonl-v1` biçiminde saklanır. Checksum öncesinde sütun ve satır sırası, tarih, sayısal değer ve null gösterimi deterministik hale getirilir. Varsayılan algoritma `sha256`dır. Fiziksel veri ve metadata önce aynı dosya sisteminde geçici dizine yazılır, ardından atomik olarak son değişmez dizinine taşınır; manifest atomik olarak son commit sınırıdır.
@@ -32,8 +32,8 @@ Snapshot verileri ek bir Parquet bağımlılığı gerektirmeyen `canonical-json
 | Alan | Veri tipi | Anlamı ve doğrulama kuralı |
 | --- | --- | --- |
 | `snapshot_id` | `string` | Mantıksal dataset anahtarı, revision numarası, içerik ve şema checksum'ından yeniden üretilebilen kararlı kimlik |
-| `source` | `string` | `yfinance` veya `isyatirim`; kaynak revision zincirleri birbirinden bağımsızdır |
-| `dataset_type` | `string` | Örneğin `equity_history` veya `nominal_ohlc` |
+| `source` | `string` | `yfinance`, `isyatirim` veya türetilmiş uygunluk için `cleaning`; kaynak revision zincirleri birbirinden bağımsızdır |
+| `dataset_type` | `string` | Örneğin `equity_history`, `nominal_ohlc` veya `market_data_eligibility` |
 | `ticker_or_instrument` | `string` | İstek kapsamındaki ticker/endeks/enstrüman kimliği; ayrı mantıksal zincir oluşturur |
 | `request_start_date` | ISO `date` | İstek döneminin kapsayıcı başlangıcı; dönem izolasyonunun parçasıdır |
 | `request_end_date` | ISO `date` | İstek döneminin kapsayıcı bitişi; yFinance hariç bitiş çağrısında bir gün ileri taşınır |
@@ -137,6 +137,69 @@ yFinance çağrıları `.IS` uzantılı semboller, `auto_adjust=False` ve `actio
 | `yf_nominal_close` | yFinance + split faktörü | Türetilmiş fiyat | `yf_provider_close × yf_future_split_factor` | `float64` | Tek kapanış ve tavan baz fiyatı | Gün kapanışından sonra | `T+3` çıkışı ve önceki geçerli kapanıştan tavan hesabı | Eksik/geçersizse `INVALID_OHLC` veya `NO_PREVIOUS_CLOSE`, `NA` | `low <= close <= high`, dönüşüm eşitliği, çapraz kalite uyarısı |
 | `is_tl_volume` | İş Yatırım `HGDG_HACIM` | Ham/sağlayıcı hacmi | Kaynak değeri | `float64` | D022 TL işlem hacmi ve kalite kontrolü | Gün kapanışından sonra | `yf_share_volume` ile işlem gerçekleşme kontrolü | İki hacim eksikse açık soru; ikisi sıfırsa `NO_TRADE` | Negatiflik, sıfır/eksik ve `SOURCE_VOLUME_CONFLICT` |
 | `cross_source_price_warning` | yFinance nominal + İş Yatırım `HG_*` | Türetilmiş kalite bayrağı | Karşılaştırılabilir nominal/İş Yatırım high-low-close alanlarından en az biri yalnız sayısal toleransı aşarsa `true` | `boolean` | Fiyat kaynakları çapraz veri kalite raporu | İlgili gün sonrasında; model feature'ı değildir | Satırı otomatik dışlamaz, kabul sonucunu etkilemez | Karşılaştırma yapılamıyorsa `NA` | Fark alanları ve sayısal tolerans raporlanır; sabit yüzde kabul eşiği yoktur |
+
+## D022/D023 Temiz Snapshot Alanları
+
+`cleaning/market_data_eligibility` yalnız fiziksel checksum'ı doğrulanan `COMPLETE` İş Yatırım raw, yFinance raw ve ilgili yFinance raw snapshot ID'sini `input_snapshot_ids` içinde taşıyan `yfinance/nominal_ohlc` snapshot'larından üretilir. Ana takvim, TL hacmi, kurumsal aksiyon sinyali ve fiyat kalite karşılaştırması İş Yatırım'dan; fiyat bağımlı bütün hesaplar yalnız yFinance nominal OHLC'den gelir. Ham snapshot'lar değiştirilmez.
+
+Temiz snapshot tarihsel uygunluk datasetidir. `prediction_date=T` satırında `entry_date=T+1` ve kurumsal aksiyon penceresi `T+1–T+3` global İş Yatırım BİST takviminden kurulur. `T+1` giriş günü alanları ve `T+1–T+3` aksiyon sonucu T kapanışında bilinmediğinden model feature'ı değildir; yalnız tarihsel giriş/işlem uygunluğu ve ilerideki label/backtest dışlama akışı içindir.
+
+| Alan | Kaynak/formül | Anlam ve durum davranışı | Tahmin anı / veri sızıntısı kuralı |
+| --- | --- | --- | --- |
+| `ticker` | Snapshot seti | Hisse işlem kodu | Kimlik; feature değildir |
+| `trade_date` | BİST takvimi | Bu datasette `entry_date` ile aynı T+1 işlem günü | T kapanışında gelecektir; feature değildir |
+| `prediction_date` | BİST takvimi | Tahmin satırının T tarihi | Zaman bölme ve kimlik alanı |
+| `entry_date` | `prediction_date` sonrasındaki ilk BİST günü | T+1 giriş günü | T kapanışında tarih bilinir, o güne ait veri bilinmez |
+| `yf_nominal_open` | D024 nominal snapshot | T+1 giriş fiyatı; eksik veya pozitif değilse `NO_OPEN` | T kapanışında bilinmez; feature değildir |
+| `yf_nominal_high` | D024 nominal snapshot | T+1 günlük yüksek; nominal OHLC kontrolünün parçası | T kapanışında bilinmez; feature değildir |
+| `yf_nominal_low` | D024 nominal snapshot | T+1 günlük düşük; `low <= open/close <= high` kontrolü | T kapanışında bilinmez; feature değildir |
+| `yf_nominal_close` | D024 nominal snapshot | T+1 kapanış; günlük kalite ve sonraki günün tavan bazı | T+1 kapanışına kadar bilinmez; T satırında feature değildir |
+| `is_tl_volume` | İş Yatırım `HGDG_HACIM` | T+1 TL hacmi; yFinance hacmiyle birlikte D022 kontrolü | T kapanışında bilinmez; feature değildir |
+| `yf_share_volume` | yFinance `Volume` | T+1 adet hacmi; İş Yatırım hacmiyle birlikte D022 kontrolü | T kapanışında bilinmez; feature değildir |
+| `previous_nominal_close` | Giriş gününden önceki son geçerli `yf_nominal_close` | Standart tavan baz fiyatı; bulunamazsa `NO_PREVIOUS_CLOSE` | T+1 için normalde T kapanışında bilinir; yalnız tavan/uygunluk hesabıdır |
+| `raw_upper_limit` | `previous_nominal_close × 1.10` | Fiyat adımına yuvarlanmamış standart üst limit | Model feature'ı değildir |
+| `price_step` | Dışarıdan verilen doğrulanmış tarih-etkin fiyat adımı tablosu | İlgili tarih/fiyat bandının adımı; kural yoksa `NA` | Doğrulanmış tarife olmadan tahmin edilmez |
+| `estimated_upper_limit` | `raw_upper_limit` değerinin `price_step` katına içeri/aşağı yuvarlanması | Standart adi pay tahmini tavanı | Yalnız giriş uygunluğu kontrolü; feature değildir |
+| `ohlc_quality_flag` | yFinance nominal OHLC | `VALID`, `NO_OPEN` veya `INVALID_OHLC` | T+1 sonucu; feature değildir |
+| `volume_quality_flag` | İki bağımsız hacim kaynağı | Hacim kanıtı/uyuşmazlığı/çözümsüzlük durumu | T+1 sonucu; feature değildir; düşük pozitif hacim eşiği yoktur |
+| `cross_source_price_warning` | yFinance nominal high/low/close ile İş Yatırım raw high/low/close karşılaştırması | Yalnız kalite uyarısı; satırı dışlamaz ve fiyatları birleştirmez | Model feature'ı değildir |
+| `corporate_action_flag` | yFinance action veya İş Yatırım düzeltme faktörü değişimi | T+1 günlük bağımsız aksiyon sinyallerinin birleşimi | Tarihsel sorgu gelecekteki düzeltmeleri içerebilir; feature değildir |
+| `corporate_action_signal_sources` | İki bağımsız sinyal | `isyatirim_adjustment_factor` ve/veya `yfinance_actions` listesi | Feature değildir; denetim alanıdır |
+| `corporate_action_source_count` | Sinyal kaynakları | Günlük sinyal veren kaynak sayısı (`0–2`) | Feature değildir |
+| `corporate_action_source_agreement` | Sinyal kaynakları | `NO_SIGNAL`, `SINGLE_SOURCE` veya `BOTH_SOURCES` | Feature değildir |
+| `corporate_action_window_flag` | Global BİST takviminde T+1–T+3 günlük sinyaller | Pencerede en az bir olay varsa `true` ve satır dışlanır | Gelecek bilgi içerir; feature/sinyal yapılamaz |
+| `corporate_action_window_dates` | T+1–T+3 aksiyon tarihleri | Olay görülen BİST günlerinin listesi | Gelecek bilgi; yalnız tarihsel dışlama/denetim |
+| `corporate_action_window_signal_sources` | Penceredeki bağımsız sinyaller | Pencere boyunca gözlenen kaynakların birleşik listesi | Gelecek bilgi; feature değildir |
+| `entry_eligible` | Bütün D022/D023 giriş kuralları | `true`, kesin dışlamada `false`, çözülmemiş kalite durumunda `NA` | T+1/T+3 sonuçlarını feature'a dönüştürmez |
+| `entry_exclusion_reason` | Deterministik raporlama önceliği | İlk/ana durum kodu | Yalnız raporlama; tek başına tam gerekçe değildir |
+| `entry_exclusion_reasons` | Bütün tetiklenen kurallar | Sıralı tam durum kodu listesi | Denetim ve downstream filtreleme; feature değildir |
+| `entry_exclusion_detail` | `NO_PREVIOUS_CLOSE` ayrıntısı | İlk gün/geçmiş yoksa `FIRST_TRADING_DAY_OR_NO_HISTORY` | Denetim alanıdır |
+| `requires_review` | Çözümsüz hacim veya fiyat adımı durumu | İnsan/veri kaynağı incelemesi gereken satır | `true` iken başka kesin dışlama yoksa `entry_eligible=NA` |
+| `input_snapshot_ids` | Manifest | Satırın üç doğrulanmış kaynak snapshot kimliği | Veri lineage; feature değildir |
+| `input_snapshot_checksums` | Manifest | Kaynak içerik checksum'ları | Tekrarlanabilirlik ve fiziksel doğrulama; feature değildir |
+| `cleaning_config_checksum` | Merkezi `CleaningConfig` | Etkin D022/D023 ayarlarının SHA-256 kimliği | Denetim alanıdır |
+| `cleaning_code_commit_sha` | Repo | Temizleme kodunu tanımlayan commit SHA | Denetim alanıdır |
+| `cleaning_version` | Merkezi config | İlk sürümde `d022-d023-v1` | Şema/kural sürümü; feature değildir |
+
+### Durum Kodları ve Öncelik
+
+Ana neden önceliği yalnız raporlama içindir; bütün nedenler `entry_exclusion_reasons` içinde korunur: `NO_OPEN`, `NO_TRADE`, `INVALID_OHLC`, `NO_PREVIOUS_CLOSE`, `SPECIAL_MARGIN_OR_CORPORATE_ACTION`, `LIMIT_OPEN`, `CORPORATE_ACTION_WINDOW`, `PRICE_STEP_UNAVAILABLE`.
+
+| Kod/bayrak | Anlam | `entry_eligible` etkisi |
+| --- | --- | --- |
+| `NO_OPEN` | T+1 nominal open eksik, sonlu değil veya pozitif değil | `false` |
+| `NO_TRADE` | İş Yatırım TL hacmi ve yFinance adet hacmi birlikte `0` | `false` |
+| `INVALID_OHLC` | Open mevcutken OHLC eksik/pozitif değil veya sınır ilişkileri geçersiz | `false` |
+| `NO_PREVIOUS_CLOSE` | Giriş gününden önce geçerli nominal kapanış yok | `false`, `requires_review=true` |
+| `LIMIT_OPEN` | T+1 nominal open tahmini tavana yalnız küçük kayan nokta toleransıyla eşit | `false` |
+| `SPECIAL_MARGIN_OR_CORPORATE_ACTION` | T+1 nominal open veya high standart tahmini tavanı aşıyor | `false`, `requires_review=true` |
+| `CORPORATE_ACTION_WINDOW` | T+1–T+3 BİST günlerinden en az birinde bağımsız aksiyon sinyali var | `false` |
+| `PRICE_STEP_UNAVAILABLE` | Tarih/fiyat için doğrulanmış fiyat adımı kuralı yok | Başka dışlama yoksa `NA`, `requires_review=true` |
+| `BOTH_VOLUMES_MISSING_UNRESOLVED` | Open var fakat iki hacim de eksik | Başka dışlama yoksa `NA`, `requires_review=true` |
+| `SOURCE_VOLUME_CONFLICT` | Bir hacim pozitifken diğeri sıfır veya eksik | Dışlamaz; kalite uyarısı |
+| `POSITIVE_VOLUME_CONFIRMED` | En az bir pozitif hacim var ve kaynak çatışması yok | Hacim nedeniyle dışlamaz |
+
+`LIMIT_OPEN` eşitliğinde `rtol=1e-12`, `atol=1e-8` yalnız kayan nokta gürültüsü içindir; bir tam fiyat adımı tolerans olarak kullanılmaz. Repo doğrulanmış tarihsel fiyat adımı tarifesi gömmez. Tarife verilmezse `price_step` ve `estimated_upper_limit` `NA` kalır.
 
 ## Kabul Testinde Üretilen Türetilmiş Alanlar
 

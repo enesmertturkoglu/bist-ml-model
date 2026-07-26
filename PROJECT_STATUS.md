@@ -4,11 +4,11 @@
 
 ## Mevcut Aşama
 
-Değişmez ham veri snapshot sürümleme ve sağlayıcı revision tespiti altyapısı tamamlandı.
+D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu altyapısı tamamlandı.
 
 İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. İki kaynağın ham verileri birbirinden bağımsız `raw` snapshot'larda; yFinance nominal OHLC ise kaynak snapshot kimliğine bağlı ayrı `derived` katmanda saklanır. Canonical checksum, atomik yazma, manifest doğrulaması ve revision fark raporu eski snapshot'ların üzerine yazılmasını önler.
 
-`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul ve snapshot/revision altyapısı aşamaları tamamlandı. Sıradaki görev D022 ve D023 durum kodlarının modüler veri temizleme kodunda uygulanmasıdır.
+`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul, snapshot/revision ve D022/D023 temizleme aşamaları tamamlandı. Sıradaki görev temiz snapshot'lardan label üretim koduna geçilmesidir.
 
 ## Tamamlananlar
 
@@ -123,6 +123,13 @@ Değişmez ham veri snapshot sürümleme ve sağlayıcı revision tespiti altyap
 - `FAILED`, `PARTIAL` ve `CORRUPT` durumları eğitim için kullanılamaz olarak ayrıldı; başarısız veya kısmi sağlayıcı sonuçlarının hata bilgisiyle denetlenebilir kaydı desteklenir hale getirildi.
 - Snapshot kimlikleri, kaynak/checksum/config/kod SHA/provider sürümü ve `input_snapshot_ids` alanları D025'teki gelecekteki model ve tahmin metadata bağlarını destekleyecek biçimde kaydedildi.
 - Snapshot/revision/izolasyon/atomik hata senaryoları ile sahte sağlayıcılı kolektör testleri eklendi; toplam 60 birim test ve mevcut gerçek kaynak kabul koşusu `PASS` tamamlandı.
+- D022/D023 kuralları `src/data/cleaning.py`, tarih-etkin fiyat adımı ve tavan hesabı `src/data/price_limits.py`, doğrulanmış snapshot orkestrasyonu `src/data/cleaning_pipeline.py` içinde modülerleştirildi; kaynak kabul betiğindeki ortak OHLC, hacim, düzeltme faktörü ve kurumsal aksiyon kuralları bu modüllere bağlandı.
+- Temizleme yalnız manifestteki, fiziksel checksum doğrulamasından geçen `COMPLETE` İş Yatırım raw, yFinance raw ve kaynak raw ID'sine bağlı yFinance nominal snapshot'larını kabul eder; ham snapshot'ları değiştirmeden yeni `derived/cleaning/market_data_eligibility` snapshot'ı üretir.
+- OHLC için `NO_OPEN`/`INVALID_OHLC`; hacim için `NO_TRADE`, `SOURCE_VOLUME_CONFLICT` ve çözümsüz `BOTH_VOLUMES_MISSING_UNRESOLVED`; tavan için `NO_PREVIOUS_CLOSE`, `LIMIT_OPEN`, `SPECIAL_MARGIN_OR_CORPORATE_ACTION` ve `PRICE_STEP_UNAVAILABLE`; kurumsal aksiyon için `CORPORATE_ACTION_WINDOW` durumları deterministik ana neden ve tam neden listesiyle üretildi.
+- `T+1–T+3` kurumsal aksiyon penceresi ticker satır sırasına göre değil, global İş Yatırım BİST takvimindeki ardışık günlere göre kuruldu; action ve gelecekteki split/audit alanlarının model feature'ı olmadığı kod ve sözlükte açıklandı.
+- Doğrulanmış tarihsel fiyat adımı tarifesi repoda bulunmadığı için hiçbir sabit tarife uydurulmadı. Temizleme dışarıdan verilen tarih-etkin tabloyu kullanır; tablo/rule yoksa `price_step` ile `estimated_upper_limit` boş kalır, `entry_eligible=NA` ve `requires_review=true` üretilir.
+- D022/D023 için 40 saf kural ve 9 snapshot/pipeline testi eklendi; mevcutlarla birlikte toplam 109 test geçti. Yeniden çalıştırılan 10 hisselik gerçek kaynak kabulü `PASS` verdi.
+- THYAO `2024-01-02`–`2024-01-12` küçük gerçek veri koşusunda 9 satırlık üç kaynak snapshot'ı `COMPLETE` doğrulandı ve 6 satırlık temiz snapshot üretildi. Fiyat adımı tarifesi verilmediğinden 6 kaydın tamamı `PRICE_STEP_UNAVAILABLE`/`requires_review`; OHLC/hacim/action dışlaması `0`, satırı dışlamayan çapraz kaynak uyarısı `6` oldu. İlk sandbox denemesindeki iki `FAILED` snapshot yalnız denetim izidir ve temizlemeye alınmadı.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -164,9 +171,9 @@ Değişmez ham veri snapshot sürümleme ve sağlayıcı revision tespiti altyap
 
 ## Sıradaki Görevler
 
-1. D022 ve D023 durum kodlarını modüler veri temizleme kodunda uygula.
-2. Kod değiştiren hisselerin eşlemesini test et.
-3. Label üretim koduna geç.
+1. Temiz ve uygunluk durumu kesinleşmiş snapshot'lardan label üretim kodunu ve testlerini oluştur.
+2. Resmi kaynağı doğrulanmış tarih-etkin BİST fiyat adımı tablosunu sisteme vererek tavan durumlarını gerçek veride tamamla.
+3. Kod değiştiren hisselerin eşlemesini test et.
 
 ## Sonraki Ana Aşamalar
 
@@ -182,8 +189,7 @@ Değişmez ham veri snapshot sürümleme ve sağlayıcı revision tespiti altyap
 
 ## Açık Sorular
 
-- Açılış mevcutken iki hacim alanının da eksik olduğu kayıtlar nasıl ele alınacak?
-- İş Yatırım düzeltme katsayısı ile eşleşmeyen yFinance action kayıtları nasıl sınıflandırılacak?
+- Doğrulanmış tarihsel BİST fiyat adımı tarifesi hangi resmi veri kaynağından ve hangi sürümleme süreciyle alınacak?
 - Likidite filtresi nasıl belirlenecek?
 - Günlük kaç hisse seçilecek?
 - Komisyon ve slippage varsayımları ne olacak?

@@ -35,6 +35,15 @@ from src.data.isyatirim_client import (  # noqa: E402
     IsYatirimClient,
     IsYatirimFetchError,
 )
+from src.data.cleaning import (  # noqa: E402
+    add_corporate_action_windows,
+    add_daily_corporate_action_signals,
+    evaluate_basic_entry_eligibility,
+    evaluate_volume_quality,
+    mark_adjustment_factor_changes as _mark_adjustment_factor_changes,
+    normalize_isyatirim_history as _normalize_isyatirim_history,
+    validate_nominal_ohlc,
+)
 from src.data.yfinance_normalization import (  # noqa: E402
     YFINANCE_KNOWN_ACTION_COLUMNS,
     YFINANCE_PRICE_COLUMNS,
@@ -137,59 +146,7 @@ def _package_version(name: str) -> str:
 
 def normalize_isyatirim_history(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
     """Normalize only the İş Yatırım fields used by the acceptance test."""
-    if raw.empty:
-        return pd.DataFrame(columns=["ticker", "date"])
-
-    missing = ISYATIRIM_REQUIRED_COLUMNS.difference(raw.columns)
-    if missing:
-        raise ValueError(f"İş Yatırım required columns missing for {ticker}: {sorted(missing)}")
-
-    frame = raw.rename(
-        columns={
-            "HGDG_TARIH": "date",
-            "HGDG_KAPANIS": "is_adjusted_close",
-            "HGDG_AOF": "is_adjusted_weighted_average",
-            "HGDG_MIN": "is_adjusted_low",
-            "HGDG_MAX": "is_adjusted_high",
-            "HGDG_HACIM": "is_tl_volume",
-            "HG_KAPANIS": "is_raw_close",
-            "HG_AOF": "is_raw_weighted_average",
-            "HG_MIN": "is_raw_low",
-            "HG_MAX": "is_raw_high",
-            "HG_HACIM": "is_raw_tl_volume",
-            "PD": "is_market_cap_try",
-            "PD_USD": "is_market_cap_usd",
-            "HAO_PD": "is_free_float_market_cap_try",
-            "HAO_PD_USD": "is_free_float_market_cap_usd",
-        }
-    ).copy()
-    frame["ticker"] = ticker
-    frame["date"] = pd.to_datetime(frame["date"]).dt.normalize()
-
-    keep = [
-        "ticker",
-        "date",
-        "is_raw_high",
-        "is_raw_low",
-        "is_raw_close",
-        "is_raw_weighted_average",
-        "is_adjusted_high",
-        "is_adjusted_low",
-        "is_adjusted_close",
-        "is_adjusted_weighted_average",
-        "is_tl_volume",
-        "is_raw_tl_volume",
-        "is_market_cap_try",
-        "is_market_cap_usd",
-        "is_free_float_market_cap_try",
-        "is_free_float_market_cap_usd",
-    ]
-    for column in keep:
-        if column not in frame:
-            frame[column] = np.nan
-    return frame[keep].sort_values(["ticker", "date"]).drop_duplicates(
-        ["ticker", "date"], keep="last"
-    ).reset_index(drop=True)
+    return _normalize_isyatirim_history(raw, ticker)
 
 
 def mark_adjustment_factor_changes(
@@ -199,24 +156,7 @@ def mark_adjustment_factor_changes(
     atol: float = ADJUSTMENT_FACTOR_ATOL,
 ) -> pd.DataFrame:
     """Calculate adjusted/raw factor and flag material day-to-day changes."""
-    result = frame.sort_values(["ticker", "date"]).copy()
-    valid = result["is_raw_close"].notna() & result["is_raw_close"].gt(0)
-    result["adjustment_factor"] = np.nan
-    result.loc[valid, "adjustment_factor"] = (
-        result.loc[valid, "is_adjusted_close"] / result.loc[valid, "is_raw_close"]
-    )
-    result["previous_adjustment_factor"] = result.groupby("ticker")[
-        "adjustment_factor"
-    ].shift(1)
-    comparable = result[["adjustment_factor", "previous_adjustment_factor"]].notna().all(axis=1)
-    result["adjustment_factor_changed"] = False
-    result.loc[comparable, "adjustment_factor_changed"] = ~np.isclose(
-        result.loc[comparable, "adjustment_factor"],
-        result.loc[comparable, "previous_adjustment_factor"],
-        rtol=rtol,
-        atol=atol,
-    )
-    return result
+    return _mark_adjustment_factor_changes(frame, rtol=rtol, atol=atol)
 
 
 def build_quality_frame(is_frame: pd.DataFrame, yf_frame: pd.DataFrame) -> pd.DataFrame:
@@ -234,60 +174,8 @@ def build_quality_frame(is_frame: pd.DataFrame, yf_frame: pd.DataFrame) -> pd.Da
     merged["has_yfinance_row"] = merged["_merge"].eq("both")
     merged = merged.drop(columns="_merge")
 
-    merged["has_open"] = (
-        merged["yf_nominal_open"].notna() & merged["yf_nominal_open"].gt(0)
-    )
-    merged["has_isyatirim_tl_volume"] = merged["is_tl_volume"].notna()
-    merged["has_yfinance_share_volume"] = merged["yf_share_volume"].notna()
-    merged["both_volumes_zero"] = (
-        merged["is_tl_volume"].eq(0) & merged["yf_share_volume"].eq(0)
-    )
-    merged["both_volumes_missing"] = (
-        merged["is_tl_volume"].isna() & merged["yf_share_volume"].isna()
-    )
-    merged["one_volume_missing"] = (
-        merged["is_tl_volume"].isna() ^ merged["yf_share_volume"].isna()
-    )
-    merged["one_volume_zero_other_positive"] = (
-        (merged["is_tl_volume"].eq(0) & merged["yf_share_volume"].gt(0))
-        | (merged["yf_share_volume"].eq(0) & merged["is_tl_volume"].gt(0))
-    )
-
-    nominal_ohlc_columns = [
-        "yf_nominal_open",
-        "yf_nominal_high",
-        "yf_nominal_low",
-        "yf_nominal_close",
-    ]
-    merged["missing_nominal_open"] = merged["yf_nominal_open"].isna()
-    merged["missing_nominal_high"] = merged["yf_nominal_high"].isna()
-    merged["missing_nominal_low"] = merged["yf_nominal_low"].isna()
-    merged["missing_nominal_close"] = merged["yf_nominal_close"].isna()
-    merged["missing_nominal_high_low_close"] = merged[
-        ["missing_nominal_high", "missing_nominal_low", "missing_nominal_close"]
-    ].any(axis=1)
-    evaluable_ohlc = merged[nominal_ohlc_columns].notna().all(axis=1)
-    positive_ohlc = merged[nominal_ohlc_columns].gt(0).all(axis=1)
-    merged["valid_nominal_ohlc"] = pd.Series(
-        pd.NA, index=merged.index, dtype="boolean"
-    )
-    merged.loc[evaluable_ohlc, "valid_nominal_ohlc"] = (
-        positive_ohlc.loc[evaluable_ohlc]
-        & merged.loc[evaluable_ohlc, "yf_nominal_low"].le(
-            merged.loc[evaluable_ohlc, "yf_nominal_open"]
-        )
-        & merged.loc[evaluable_ohlc, "yf_nominal_open"].le(
-            merged.loc[evaluable_ohlc, "yf_nominal_high"]
-        )
-        & merged.loc[evaluable_ohlc, "yf_nominal_low"].le(
-            merged.loc[evaluable_ohlc, "yf_nominal_close"]
-        )
-        & merged.loc[evaluable_ohlc, "yf_nominal_close"].le(
-            merged.loc[evaluable_ohlc, "yf_nominal_high"]
-        )
-    )
-    # Temporary compatibility alias; it now means yFinance nominal OHLC only.
-    merged["valid_ohlc"] = merged["valid_nominal_ohlc"]
+    merged = validate_nominal_ohlc(merged)
+    merged = evaluate_volume_quality(merged)
 
     split_factor = pd.to_numeric(merged["yf_future_split_factor"], errors="coerce")
     merged["split_factor_unavailable"] = (
@@ -400,78 +288,13 @@ def build_quality_frame(is_frame: pd.DataFrame, yf_frame: pd.DataFrame) -> pd.Da
         "nominal_source_price_conflict"
     ]
 
-    for column in ("yf_dividends", "yf_stock_splits", "yf_capital_gains", "yf_other_action_value"):
-        if column not in merged:
-            merged[column] = 0.0
-    merged["has_yfinance_dividend"] = merged["yf_dividends"].fillna(0).ne(0)
-    merged["has_yfinance_split"] = merged["yf_stock_splits"].fillna(0).ne(0)
-    merged["has_yfinance_other_action"] = (
-        merged[["yf_capital_gains", "yf_other_action_value"]].fillna(0).abs().sum(axis=1).gt(0)
+    merged = add_daily_corporate_action_signals(merged)
+    merged = add_corporate_action_windows(
+        merged,
+        sorted(merged["date"].dropna().unique()),
+        horizon_days=3,
     )
-    merged["has_yfinance_action"] = merged[
-        ["has_yfinance_dividend", "has_yfinance_split", "has_yfinance_other_action"]
-    ].any(axis=1)
-    merged["has_any_corporate_action_signal"] = (
-        merged["adjustment_factor_changed"] | merged["has_yfinance_action"]
-    )
-    merged["normal_day"] = ~merged["has_any_corporate_action_signal"]
-    merged["dividend_day"] = merged["has_yfinance_dividend"]
-    merged["split_day"] = merged["has_yfinance_split"]
-    merged["adjustment_factor_change_day"] = merged["adjustment_factor_changed"]
-    merged["corporate_action_source"] = np.select(
-        [
-            merged["adjustment_factor_changed"] & merged["has_yfinance_action"],
-            merged["adjustment_factor_changed"],
-            merged["has_yfinance_action"],
-        ],
-        ["both", "isyatirim_only", "yfinance_only"],
-        default="none",
-    )
-
-    future_action_flags = [
-        merged.groupby("ticker", sort=False)["has_any_corporate_action_signal"]
-        .shift(-offset, fill_value=False)
-        .astype(bool)
-        for offset in (1, 2, 3)
-    ]
-    merged["corporate_action_window"] = pd.concat(
-        future_action_flags, axis=1
-    ).any(axis=1)
-
-    merged["volume_quality_flag"] = pd.Series(
-        pd.NA, index=merged.index, dtype="string"
-    )
-    volume_conflict = merged["one_volume_missing"] | merged[
-        "one_volume_zero_other_positive"
-    ]
-    merged.loc[volume_conflict, "volume_quality_flag"] = "SOURCE_VOLUME_CONFLICT"
-
-    merged["entry_eligible"] = pd.Series(True, index=merged.index, dtype="boolean")
-    merged["entry_exclusion_reason"] = pd.Series(
-        pd.NA, index=merged.index, dtype="string"
-    )
-    no_open = ~merged["has_open"]
-    no_trade = ~no_open & merged["both_volumes_zero"]
-    invalid_ohlc = (
-        ~no_open & ~no_trade & merged["valid_nominal_ohlc"].eq(False)
-    )
-    unresolved_volume = (
-        ~no_open & ~no_trade & merged["both_volumes_missing"]
-    )
-    merged.loc[no_open, ["entry_eligible", "entry_exclusion_reason"]] = [
-        False,
-        "NO_OPEN",
-    ]
-    merged.loc[no_trade, ["entry_eligible", "entry_exclusion_reason"]] = [
-        False,
-        "NO_TRADE",
-    ]
-    merged.loc[invalid_ohlc, ["entry_eligible", "entry_exclusion_reason"]] = [
-        False,
-        "INVALID_OHLC",
-    ]
-    # D022 intentionally leaves this case unresolved rather than inventing a rule.
-    merged.loc[unresolved_volume, "entry_eligible"] = pd.NA
+    merged = evaluate_basic_entry_eligibility(merged)
 
     merged["label_eligible"] = pd.Series(True, index=merged.index, dtype="boolean")
     merged["label_exclusion_reason"] = pd.Series(
