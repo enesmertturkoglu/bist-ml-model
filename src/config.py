@@ -69,6 +69,28 @@ class CleaningConfig:
 
 
 @dataclass(frozen=True)
+class LabelConfig:
+    """D011-D014 label contract kept stable and auditable."""
+
+    target_return: str = "0.05"
+    horizon_days: int = 3
+    instrument_type: str = "EQUITY"
+    label_dataset_type: str = "three_day_target"
+    label_version: str = "d011-d014-d020-d023-d024-d026-v1"
+
+    def checksum(self, algorithm: str = "sha256") -> str:
+        """Return a stable checksum of the effective label contract."""
+
+        encoded = json.dumps(
+            _json_ready(asdict(self)),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.new(algorithm, encoded).hexdigest()
+
+
+@dataclass(frozen=True)
 class MarketDataConfig:
     """Filesystem, date, checksum and provider settings for data collection."""
 
@@ -89,6 +111,7 @@ class MarketDataConfig:
     checksum_algorithm: str = "sha256"
     snapshot_statuses: tuple[str, ...] = tuple(status.value for status in SnapshotStatus)
     cleaning: CleaningConfig = field(default_factory=CleaningConfig)
+    label: LabelConfig = field(default_factory=LabelConfig)
     isyatirim: ProviderRequestConfig = field(
         default_factory=lambda: ProviderRequestConfig(
             timeout_seconds=60.0,

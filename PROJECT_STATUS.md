@@ -1,14 +1,14 @@
 # PROJECT STATUS
 
-**Son güncelleme:** 2026-07-26
+**Son güncelleme:** 2026-07-27
 
 ## Mevcut Aşama
 
-D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu altyapısı ile D026 resmî, tarih-etkin BİST pay fiyat adımı entegrasyonu tamamlandı.
+D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiyat adımı ve üç BİST işlem günlük label üretim altyapısı tamamlandı.
 
 İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. İki kaynağın ham verileri birbirinden bağımsız `raw` snapshot'larda; yFinance nominal OHLC ise kaynak snapshot kimliğine bağlı ayrı `derived` katmanda saklanır. Canonical checksum, atomik yazma, manifest doğrulaması ve revision fark raporu eski snapshot'ların üzerine yazılmasını önler.
 
-`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul, snapshot/revision, D022/D023 temizleme ve D026 fiyat adımı aşamaları tamamlandı. Sıradaki görev temiz snapshot'lardan label üretim koduna geçilmesidir.
+`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul, snapshot/revision, temizleme, fiyat adımı ve label üretimi tamamlandı. Sıradaki görev kod değiştiren aktif hisselerin doğrulanmış eşlemesini tamamlamak; ardından feature engineering hazırlığına geçmektir.
 
 ## Tamamlananlar
 
@@ -132,6 +132,10 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu altyapısı ile 
 - Tavan hesabı `previous_valid_yf_nominal_close × Decimal("1.10")`, `entry_date + EQUITY + raw_upper_limit` kural çözümü ve `Decimal` ile içeri/aşağı yuvarlama sırasına bağlandı. Çözülen kural kimliği, tarih aralığı, fiyat adımı, çözüm durumu ve resmî belge temiz snapshot'ta saklanır; kural yoksa mevcut açık inceleme davranışı korunur.
 - Fiyat adımı sınırları, rejim geçişleri, boşluk/çakışma, bilinmeyen tarih/enstrüman, `Decimal` deterministikliği ve temizleme entegrasyonuyla birlikte toplam 153 birim test geçti. Yeniden çalıştırılan 10 hisselik gerçek kaynak kabulü `PASS` verdi.
 - THYAO `2024-01-02`–`2024-01-12` üç kaynak snapshot seti D026 tarifesi ve `1c5c7a7` kod commit'iyle yeniden temizlendi. Yeni `COMPLETE` snapshot `snap_80ea98811d6a6f3a_r0001_0141392192f1` oldu: 6/6 fiyat adımı `BIST_EQUITY_FROM_20231106_V1` ile çözüldü, `PRICE_STEP_UNAVAILABLE=0`, `requires_review=0`, `entry_eligible=true` 6, diğer dışlama kodları 0 ve satırı dışlamayan çapraz kaynak uyarısı 6 ölçüldü. İçerik checksum'u `7350ad8a5c39f32942f616c4ea8ffd2193691e70982c099d604d6c8e7096d030` olarak kaydedildi.
+- D011–D014 label kuralları `src/data/labels.py` içinde saf ve `Decimal` tabanlı; doğrulanmış clean snapshot orkestrasyonu `src/data/label_pipeline.py` içinde ayrı sorumluluk olarak uygulandı. Hedef `entry_price × 1.05` ham değerinin giriş tarihindeki D026 fiyat adımına yukarı yuvarlanmasıyla oluşur; ilk hedef günü günlük high ile belirlenir, hedef yoksa T+3 nominal kapanış çıkışıdır.
+- Label üretimi yalnız fiziksel checksum doğrulamasından geçen `COMPLETE` `cleaning/market_data_eligibility` snapshot'ını okur; raw/clean veriyi değiştirmeden doğrudan kaynak clean ID/checksum'una bağlı `derived/labels/three_day_target` snapshot'ı yazar. Aynı input/config/kod sonucu idempotenttir.
+- Giriş uygun değilse, inceleme gerekiyorsa, source dışlama nedeni varsa, global BİST takvim zinciri T+1–T+3'ü tamamlamıyorsa veya gerekli nominal horizon fiyatı geçersizse label `0` yapılmaz; `label_status=NA` ve açık neden üretilir. Horizon ticker satır sırasına göre kaydırılmaz ve T+4 high label'a girmez.
+- Label/çıkış/takvim/NA/provenance/idempotence ve D020 kapsam senaryolarını kapsayan 42 test eklendi; mevcutlarla birlikte toplam 195 test geçti. Gerçek küçük clean snapshot label koşusu, kod commit'inden sonra üretilip rapora bağlanacaktır.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -173,8 +177,8 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu altyapısı ile 
 
 ## Sıradaki Görevler
 
-1. Temiz ve uygunluk durumu kesinleşmiş snapshot'lardan label üretim kodunu ve testlerini oluştur.
-2. Kod değiştiren hisselerin eşlemesini test et.
+1. Kod değiştiren aktif hisselerin resmî kayıtlarla eşlemesini ve tarih-etkin `security_id` tablosunu oluşturup test et.
+2. Feature engineering için kullanılabilirlik zamanlarını ve feature kataloğunu hazırlamaya başla.
 
 ## Sonraki Ana Aşamalar
 

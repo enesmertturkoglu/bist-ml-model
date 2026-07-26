@@ -231,6 +231,44 @@ Ana neden önceliği yalnız raporlama içindir; bütün nedenler `entry_exclusi
 
 `LIMIT_OPEN` eşitliğinde `rtol=1e-12`, `atol=1e-8` yalnız sağlayıcı/çıktı sınırındaki kayan nokta gürültüsü içindir; bir tam fiyat adımı tolerans olarak kullanılmaz. Para, band seçimi ve fiyat adımına yuvarlama hesapları `Decimal` ile yapılır. D026 tablosunda tarih/fiyat/enstrüman için kural yoksa `tick_size`, `price_step`, kural metadata'sı ve `estimated_upper_limit` `NA` kalır; durum `UNAVAILABLE` olarak kaydedilir.
 
+## D011–D014 Üç Günlük Label Snapshot Alanları
+
+`derived/labels/three_day_target`, yalnız fiziksel checksum doğrulamasından geçen `COMPLETE` `cleaning/market_data_eligibility` snapshot'larından üretilir. Kaynak clean veya raw snapshot üzerine yazılmaz. Doğrudan kaynak clean snapshot ID/checksum'u, label config checksum'u ve üretim kodu commit SHA'sı her satırda ve snapshot metadata'sında saklanır.
+
+Global BİST takvimi clean snapshot'taki tutarlı `prediction_date → entry_date` ilişkilerinden kurulur. Bir ticker satırı eksik olduğunda horizon sonraki mevcut ticker gününe kaydırılmaz. T+2/T+3 takvim bağı veya ilgili ticker/gün clean satırı bulunamazsa label `NA` kalır. T+4 ve sonrası fiyatlar label hesabına girmez.
+
+| Alan | Kaynak/formül | Anlam ve durum davranışı | Tahmin anı / veri sızıntısı kuralı |
+| --- | --- | --- | --- |
+| `ticker` | Kaynak clean snapshot | Hisse işlem kodu | Kimlik; feature değildir |
+| `prediction_date` | Kaynak clean snapshot | Tahmin tarihi `T` | Zaman bölme/kimlik alanı |
+| `entry_date` | Global BİST takvimi | `T+1` giriş tarihi | Tarih T kapanışında bilinir; o günün fiyatı bilinmez |
+| `horizon_t2_date` | Global BİST takvimi | İkinci horizon işlem günü | Gelecek sonuç tarihi; feature değildir |
+| `horizon_t3_date` | Global BİST takvimi | Üçüncü horizon işlem günü | Gelecek sonuç tarihi; feature değildir |
+| `entry_price` | `yf_nominal_open[T+1]` | Giriş fiyatı; yalnız giriş uygun ve pozitifse kullanılır | T kapanışında bilinmez; label sonucu alanıdır |
+| `raw_target_price` | `Decimal(str(entry_price)) × Decimal("1.05")` | Fiyat adımına yuvarlanmamış brüt `%5` hedef | Label hesabı; feature değildir |
+| `target_tick_size` | D026 tablosu; `entry_date + EQUITY + raw_target_price` | Hedef emir için çözülen fiyat adımı | Tarih-etkin referans; feature değildir |
+| `target_price` | `raw_target_price` değerinin `target_tick_size` katına `Decimal` ile yukarı yuvarlanması | Uygulanabilir hedef satış fiyatı; aşağı yuvarlanmaz | Label/backtest işlem kuralı; feature değildir |
+| `target_hit` | T+1–T+3 `yf_nominal_high` | Üç günden birinde high hedefe eşit/yüksekse `true`; NA satırda `NA` | Gelecek sonuç; feature değildir |
+| `target_hit_date` | İlk hedef high günü | Hedefe ilk ulaşılan global BİST tarihi | Gün içi saat bilinmez; yalnız günlük high kanıtıdır |
+| `target_hit_horizon` | İlk hedef günü | `1`, `2` veya `3`; hedef yoksa/NA ise boş | Gelecek sonuç; feature değildir |
+| `label` | `max(high[T+1:T+3]) >= target_price` | Pozitif `1`, hedef yoksa `0`, uygunluk/veri sorunu varsa nullable `NA` | Yalnız tamamlanmış horizon eğitimde kullanılabilir |
+| `label_status` | Label üretim sonucu | `LABELED` veya `NA` | Eğitim filtresi/denetim alanı |
+| `label_exclusion_reason` | İlk source veya label kalite nedeni | NA kaydın ana nedeni | Negatif sınıf değildir |
+| `label_exclusion_reasons` | Source clean nedenleri veya label kalite nedeni | Source dışlamalarını kaybetmeyen tam neden listesi | Denetim; feature değildir |
+| `exit_date` | İlk hedef günü veya T+3 | Hedefte ilk hit tarihi; hedefsiz işlemde T+3 | Gelecek sonuç; feature değildir |
+| `exit_price` | `target_price` veya `yf_nominal_close[T+3]` | Brüt label senaryosu çıkış fiyatı | Komisyon/slippage içermez |
+| `exit_reason` | Label sonucu | `TARGET_HIT` veya `HORIZON_CLOSE`; NA kayıtta boş | Denetim; feature değildir |
+| `gross_return` | `exit_price / entry_price - 1` | Brüt fiyat getirisi | Komisyon/slippage içermez; net backtest getirisi değildir |
+| `input_clean_snapshot_id` | Snapshot manifesti | Doğrudan kaynak clean snapshot kimliği | Lineage; feature değildir |
+| `input_clean_snapshot_checksum` | Snapshot manifesti | Fiziksel olarak doğrulanmış clean içerik checksum'u | Lineage/tekrarlanabilirlik |
+| `label_config_checksum` | Merkezi `LabelConfig` | `%5`, üç gün, `EQUITY` ve label sürümü ayarlarının SHA-256 kimliği | Denetim alanı |
+| `label_code_commit_sha` | Repo | Label kodunu tanımlayan commit SHA | Denetim alanı |
+| `label_version` | Merkezi `LabelConfig` | `d011-d014-d020-d023-d024-d026-v1` | Kural/şema sürümü |
+
+`entry_eligible != true`, `requires_review=true` veya source `entry_exclusion_reasons` doluysa label hesaplanmaz. `CORPORATE_ACTION_WINDOW`, `LIMIT_OPEN`, `NO_OPEN`, `NO_TRADE`, `INVALID_OHLC`, `NO_PREVIOUS_CLOSE`, `SPECIAL_MARGIN_OR_CORPORATE_ACTION` ve `PRICE_STEP_UNAVAILABLE` nedenleri korunur. Ek label nedenleri `ENTRY_NOT_ELIGIBLE`, `REQUIRES_REVIEW`, `TARGET_TICK_SIZE_UNAVAILABLE`, `INCOMPLETE_HORIZON`, `MISSING_HORIZON_ROW`, `HORIZON_NO_TRADE`, `INVALID_HORIZON_PRICE` ve `MISSING_T3_CLOSE` olabilir. Bunların hiçbiri negatif label değildir.
+
+Label hesabı yalnız yFinance nominal open/high/close alanlarını kullanır. İş Yatırım fiyatları, `yf_future_split_factor`, gelecek action alanları, komisyon ve slippage label formülüne girmez. Kurumsal işlem penceresi clean snapshot'taki tarihsel dışlama sonucu olarak taşınır; model feature'ına dönüştürülmez.
+
 ## Kabul Testinde Üretilen Türetilmiş Alanlar
 
 Aşağıdaki alanlar kaynak sütunu değil, kabul testi kalite çıktılarıdır:
