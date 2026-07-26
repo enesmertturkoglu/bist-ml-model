@@ -1,7 +1,12 @@
-"""Run the local İş Yatırım/yFinance source acceptance test.
+"""Run the local single-price-source acceptance test.
 
-The script intentionally writes only aggregate metrics, corporate-action event
-rows and a Markdown summary. Full source responses are never persisted.
+yFinance nominal OHLC is the only price series evaluated for entry, label,
+exit and upper-limit calculations. İş Yatırım supplies the BIST calendar,
+TRY volume and auxiliary quality signals; its prices are comparison-only.
+
+The script intentionally writes aggregate metrics, corporate-action event rows
+and a Markdown summary. Versioned raw-source storage belongs to the subsequent
+data-collection pipeline and is not implemented by this acceptance runner.
 """
 
 from __future__ import annotations
@@ -70,6 +75,17 @@ ADJUSTMENT_FACTOR_RTOL = 1e-4
 ADJUSTMENT_FACTOR_ATOL = 5e-5
 PRICE_COMPARE_ATOL = 1e-8
 
+# This acceptance module does not define model features. Keeping the explicit
+# list makes it testable that normalization/action fields never become signals.
+MODEL_FEATURE_COLUMNS: tuple[str, ...] = ()
+NON_FEATURE_NORMALIZATION_COLUMNS = {
+    "yf_future_split_factor",
+    "yf_stock_splits",
+    "yf_dividends",
+    "yf_capital_gains",
+    "yf_other_action_value",
+}
+
 
 @dataclass(frozen=True)
 class PeriodSpec:
@@ -135,7 +151,7 @@ def normalize_yfinance_history(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
         "High": "yf_provider_high",
         "Low": "yf_provider_low",
         "Close": "yf_provider_close",
-        "Adj Close": "yf_adjusted_close",
+        "Adj Close": "yf_provider_adjusted_close",
         "Volume": "yf_share_volume",
         "Dividends": "yf_dividends",
         "Stock Splits": "yf_stock_splits",
@@ -149,7 +165,7 @@ def normalize_yfinance_history(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
                 "yf_provider_high",
                 "yf_provider_low",
                 "yf_provider_close",
-                "yf_adjusted_close",
+                "yf_provider_adjusted_close",
                 "yf_share_volume",
             } else np.nan
 
@@ -175,7 +191,7 @@ def normalize_yfinance_history(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
         "yf_provider_high",
         "yf_provider_low",
         "yf_provider_close",
-        "yf_adjusted_close",
+        "yf_provider_adjusted_close",
         "yf_share_volume",
         "yf_dividends",
         "yf_stock_splits",
@@ -191,8 +207,9 @@ def add_future_split_normalization(frame: pd.DataFrame) -> pd.DataFrame:
 
     A split on a row's own date is deliberately excluded. Zero, missing,
     non-finite and non-positive split values have a neutral factor of one.
-    Original provider prices are preserved and legacy ``yf_*`` aliases remain
-    available for callers written before the scale test.
+    Original provider prices are preserved. Legacy ``yf_*`` aliases remain
+    available only for callers written before the single-source decision; all
+    price-dependent acceptance logic uses ``yf_nominal_*`` fields.
     """
     result = frame.sort_values(["ticker", "date"]).copy()
     for field in ("open", "high", "low", "close"):
@@ -314,7 +331,7 @@ def mark_adjustment_factor_changes(
 
 
 def build_quality_frame(is_frame: pd.DataFrame, yf_frame: pd.DataFrame) -> pd.DataFrame:
-    """Left-join to the İş Yatırım calendar and calculate requested quality flags."""
+    """Build single-source OHLC acceptance and cross-source warning fields."""
     is_marked = mark_adjustment_factor_changes(is_frame)
     prepared_yf = add_future_split_normalization(yf_frame)
     merged = is_marked.merge(
@@ -329,7 +346,7 @@ def build_quality_frame(is_frame: pd.DataFrame, yf_frame: pd.DataFrame) -> pd.Da
     merged = merged.drop(columns="_merge")
 
     merged["has_open"] = (
-        merged["yf_provider_open"].notna() & merged["yf_provider_open"].gt(0)
+        merged["yf_nominal_open"].notna() & merged["yf_nominal_open"].gt(0)
     )
     merged["has_isyatirim_tl_volume"] = merged["is_tl_volume"].notna()
     merged["has_yfinance_share_volume"] = merged["yf_share_volume"].notna()
@@ -347,19 +364,63 @@ def build_quality_frame(is_frame: pd.DataFrame, yf_frame: pd.DataFrame) -> pd.Da
         | (merged["yf_share_volume"].eq(0) & merged["is_tl_volume"].gt(0))
     )
 
-    ohlc_columns = ["is_raw_low", "yf_provider_open", "is_raw_high", "is_raw_close"]
-    evaluable_ohlc = merged[ohlc_columns].notna().all(axis=1)
-    merged["valid_ohlc"] = pd.Series(pd.NA, index=merged.index, dtype="boolean")
-    merged.loc[evaluable_ohlc, "valid_ohlc"] = (
-        merged.loc[evaluable_ohlc, "is_raw_low"].le(
-            merged.loc[evaluable_ohlc, "yf_provider_open"]
-        )
-        & merged.loc[evaluable_ohlc, "yf_provider_open"].le(
-            merged.loc[evaluable_ohlc, "is_raw_high"]
-        )
-        & merged.loc[evaluable_ohlc, "is_raw_low"].le(merged.loc[evaluable_ohlc, "is_raw_close"])
-        & merged.loc[evaluable_ohlc, "is_raw_close"].le(merged.loc[evaluable_ohlc, "is_raw_high"])
+    nominal_ohlc_columns = [
+        "yf_nominal_open",
+        "yf_nominal_high",
+        "yf_nominal_low",
+        "yf_nominal_close",
+    ]
+    merged["missing_nominal_open"] = merged["yf_nominal_open"].isna()
+    merged["missing_nominal_high"] = merged["yf_nominal_high"].isna()
+    merged["missing_nominal_low"] = merged["yf_nominal_low"].isna()
+    merged["missing_nominal_close"] = merged["yf_nominal_close"].isna()
+    merged["missing_nominal_high_low_close"] = merged[
+        ["missing_nominal_high", "missing_nominal_low", "missing_nominal_close"]
+    ].any(axis=1)
+    evaluable_ohlc = merged[nominal_ohlc_columns].notna().all(axis=1)
+    positive_ohlc = merged[nominal_ohlc_columns].gt(0).all(axis=1)
+    merged["valid_nominal_ohlc"] = pd.Series(
+        pd.NA, index=merged.index, dtype="boolean"
     )
+    merged.loc[evaluable_ohlc, "valid_nominal_ohlc"] = (
+        positive_ohlc.loc[evaluable_ohlc]
+        & merged.loc[evaluable_ohlc, "yf_nominal_low"].le(
+            merged.loc[evaluable_ohlc, "yf_nominal_open"]
+        )
+        & merged.loc[evaluable_ohlc, "yf_nominal_open"].le(
+            merged.loc[evaluable_ohlc, "yf_nominal_high"]
+        )
+        & merged.loc[evaluable_ohlc, "yf_nominal_low"].le(
+            merged.loc[evaluable_ohlc, "yf_nominal_close"]
+        )
+        & merged.loc[evaluable_ohlc, "yf_nominal_close"].le(
+            merged.loc[evaluable_ohlc, "yf_nominal_high"]
+        )
+    )
+    # Temporary compatibility alias; it now means yFinance nominal OHLC only.
+    merged["valid_ohlc"] = merged["valid_nominal_ohlc"]
+
+    split_factor = pd.to_numeric(merged["yf_future_split_factor"], errors="coerce")
+    merged["split_factor_unavailable"] = (
+        merged["has_yfinance_row"]
+        & (split_factor.isna() | ~np.isfinite(split_factor) | split_factor.le(0))
+    )
+    conversion_checks: list[pd.Series] = []
+    for field in ("open", "high", "low", "close"):
+        provider = merged[f"yf_provider_{field}"]
+        nominal = merged[f"yf_nominal_{field}"]
+        comparable = provider.notna() & split_factor.notna()
+        field_check = pd.Series(True, index=merged.index)
+        field_check.loc[comparable] = np.isclose(
+            nominal.loc[comparable],
+            provider.loc[comparable] * split_factor.loc[comparable],
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        conversion_checks.append(field_check)
+    merged["nominal_conversion_consistent"] = pd.concat(
+        conversion_checks, axis=1
+    ).all(axis=1)
 
     provider_open_columns = ["is_raw_low", "yf_provider_open", "is_raw_high"]
     nominal_open_columns = ["is_raw_low", "yf_nominal_open", "is_raw_high"]
@@ -446,6 +507,9 @@ def build_quality_frame(is_frame: pd.DataFrame, yf_frame: pd.DataFrame) -> pd.Da
     merged.loc[nominal_any_comparable, "nominal_source_price_conflict"] = pd.concat(
         nominal_comparable_flags, axis=1
     ).any(axis=1).loc[nominal_any_comparable]
+    merged["cross_source_price_warning"] = merged[
+        "nominal_source_price_conflict"
+    ]
 
     for column in ("yf_dividends", "yf_stock_splits", "yf_capital_gains", "yf_other_action_value"):
         if column not in merged:
@@ -474,6 +538,60 @@ def build_quality_frame(is_frame: pd.DataFrame, yf_frame: pd.DataFrame) -> pd.Da
         ["both", "isyatirim_only", "yfinance_only"],
         default="none",
     )
+
+    future_action_flags = [
+        merged.groupby("ticker", sort=False)["has_any_corporate_action_signal"]
+        .shift(-offset, fill_value=False)
+        .astype(bool)
+        for offset in (1, 2, 3)
+    ]
+    merged["corporate_action_window"] = pd.concat(
+        future_action_flags, axis=1
+    ).any(axis=1)
+
+    merged["volume_quality_flag"] = pd.Series(
+        pd.NA, index=merged.index, dtype="string"
+    )
+    volume_conflict = merged["one_volume_missing"] | merged[
+        "one_volume_zero_other_positive"
+    ]
+    merged.loc[volume_conflict, "volume_quality_flag"] = "SOURCE_VOLUME_CONFLICT"
+
+    merged["entry_eligible"] = pd.Series(True, index=merged.index, dtype="boolean")
+    merged["entry_exclusion_reason"] = pd.Series(
+        pd.NA, index=merged.index, dtype="string"
+    )
+    no_open = ~merged["has_open"]
+    no_trade = ~no_open & merged["both_volumes_zero"]
+    invalid_ohlc = (
+        ~no_open & ~no_trade & merged["valid_nominal_ohlc"].eq(False)
+    )
+    unresolved_volume = (
+        ~no_open & ~no_trade & merged["both_volumes_missing"]
+    )
+    merged.loc[no_open, ["entry_eligible", "entry_exclusion_reason"]] = [
+        False,
+        "NO_OPEN",
+    ]
+    merged.loc[no_trade, ["entry_eligible", "entry_exclusion_reason"]] = [
+        False,
+        "NO_TRADE",
+    ]
+    merged.loc[invalid_ohlc, ["entry_eligible", "entry_exclusion_reason"]] = [
+        False,
+        "INVALID_OHLC",
+    ]
+    # D022 intentionally leaves this case unresolved rather than inventing a rule.
+    merged.loc[unresolved_volume, "entry_eligible"] = pd.NA
+
+    merged["label_eligible"] = pd.Series(True, index=merged.index, dtype="boolean")
+    merged["label_exclusion_reason"] = pd.Series(
+        pd.NA, index=merged.index, dtype="string"
+    )
+    merged.loc[
+        merged["corporate_action_window"],
+        ["label_eligible", "label_exclusion_reason"],
+    ] = [False, "CORPORATE_ACTION_WINDOW"]
     return merged.sort_values(["ticker", "date"]).reset_index(drop=True)
 
 
@@ -489,9 +607,9 @@ def _quantile(series: pd.Series, quantile: float) -> float:
 def calculate_metric_row(frame: pd.DataFrame, ticker: str, period: PeriodSpec) -> dict[str, object]:
     expected_days = len(frame)
     yfinance_matches = int(frame["has_yfinance_row"].sum())
-    missing_open = int((~frame["has_open"]).sum())
-    evaluable_ohlc = int(frame["valid_ohlc"].notna().sum())
-    inconsistent_ohlc = int(frame["valid_ohlc"].eq(False).sum())
+    missing_open = int(frame["missing_nominal_open"].sum())
+    evaluable_ohlc = int(frame["valid_nominal_ohlc"].notna().sum())
+    invalid_ohlc = int(frame["valid_nominal_ohlc"].eq(False).sum())
     provider_open_evaluable = int(frame["provider_open_within_is_range"].notna().sum())
     provider_open_inconsistent = int(
         frame["provider_open_within_is_range"].eq(False).sum()
@@ -508,8 +626,28 @@ def calculate_metric_row(frame: pd.DataFrame, ticker: str, period: PeriodSpec) -
         "expected_isyatirim_days": expected_days,
         "yfinance_matching_days": yfinance_matches,
         "yfinance_date_match_rate": _safe_rate(yfinance_matches, expected_days),
-        "missing_open_count": missing_open,
-        "missing_open_rate": _safe_rate(missing_open, expected_days),
+        "missing_nominal_open_count": missing_open,
+        "missing_nominal_open_rate": _safe_rate(missing_open, expected_days),
+        "missing_nominal_high_count": int(frame["missing_nominal_high"].sum()),
+        "missing_nominal_low_count": int(frame["missing_nominal_low"].sum()),
+        "missing_nominal_close_count": int(frame["missing_nominal_close"].sum()),
+        "missing_nominal_high_low_close_count": int(
+            frame["missing_nominal_high_low_close"].sum()
+        ),
+        "nominal_ohlc_evaluable_count": evaluable_ohlc,
+        "invalid_nominal_ohlc_count": invalid_ohlc,
+        "nominal_ohlc_validity_rate": _safe_rate(
+            evaluable_ohlc - invalid_ohlc, evaluable_ohlc
+        ),
+        "split_factor_unavailable_count": int(
+            frame["split_factor_unavailable"].sum()
+        ),
+        "corporate_action_window_count": int(
+            frame["corporate_action_window"].sum()
+        ),
+        "cross_source_price_warning_count": int(
+            frame["cross_source_price_warning"].eq(True).sum()
+        ),
         "isyatirim_tl_volume_missing_count": int(frame["is_tl_volume"].isna().sum()),
         "isyatirim_tl_volume_zero_count": int(frame["is_tl_volume"].eq(0).sum()),
         "yfinance_share_volume_missing_count": int(frame["yf_share_volume"].isna().sum()),
@@ -523,10 +661,12 @@ def calculate_metric_row(frame: pd.DataFrame, ticker: str, period: PeriodSpec) -
         "one_volume_zero_other_positive_count": int(
             frame["one_volume_zero_other_positive"].sum()
         ),
-        "ohlc_evaluable_count": evaluable_ohlc,
-        "ohlc_inconsistency_count": inconsistent_ohlc,
-        "hybrid_ohlc_validity_rate": _safe_rate(
-            evaluable_ohlc - inconsistent_ohlc, evaluable_ohlc
+        "no_open_status_count": int(frame["entry_exclusion_reason"].eq("NO_OPEN").sum()),
+        "invalid_ohlc_status_count": int(
+            frame["entry_exclusion_reason"].eq("INVALID_OHLC").sum()
+        ),
+        "corporate_action_window_status_count": int(
+            frame["label_exclusion_reason"].eq("CORPORATE_ACTION_WINDOW").sum()
         ),
         "provider_open_evaluable_count": provider_open_evaluable,
         "provider_open_inconsistency_count": provider_open_inconsistent,
@@ -768,29 +908,53 @@ def determine_acceptance_status(
     required_yf: bool,
     errors: list[str],
     quality: pd.DataFrame,
-    scale_metrics: pd.DataFrame,
 ) -> tuple[str, str]:
-    """Return conservative PASS/PARTIAL/FAIL without inventing a tolerance."""
-    if errors or not required_is or not required_yf or quality.empty:
+    """Return PASS/PARTIAL/FAIL without a cross-source percentage threshold."""
+    if errors:
+        return (
+            "FAIL",
+            f"Kaynak koşusu {len(errors)} sağlayıcı hatasıyla eksik kaldı; "
+            "gerekli tüm hisse ve dönemler alınamadı.",
+        )
+    if not required_is or not required_yf or quality.empty:
         return "FAIL", "Gerekli kaynak, alan veya eksiksiz veri koşusu sağlanamadı."
+
+    required_quality_columns = {
+        "valid_nominal_ohlc",
+        "split_factor_unavailable",
+        "nominal_conversion_consistent",
+        "entry_exclusion_reason",
+        "label_exclusion_reason",
+        "cross_source_price_warning",
+    }
+    missing_quality_columns = required_quality_columns.difference(quality.columns)
+    if missing_quality_columns:
+        return (
+            "FAIL",
+            f"Gerekli kalite alanları üretilemedi: {sorted(missing_quality_columns)}",
+        )
+    if bool(quality["split_factor_unavailable"].any()):
+        return "FAIL", "En az bir yFinance satırında split faktörü üretilemedi."
+    if not bool(quality["nominal_conversion_consistent"].all()):
+        return "FAIL", "Nominal OHLC alanlarına aynı split faktörü uygulanmadı."
     if not bool(quality["has_yfinance_split"].any()):
-        return "FAIL", "Gerçek bir split olayı gözlenmedi; dönüşüm doğrulanamadı."
-    full_normal_split = scale_metrics[
-        scale_metrics["period"].eq("full_period")
-        & scale_metrics["ticker"].eq("__SPLIT_TICKERS__")
-        & scale_metrics["day_group"].eq("normal_day")
-    ]
-    if full_normal_split.empty or not int(
-        full_normal_split.iloc[0]["nominal_evaluable_count"]
-    ):
-        return "FAIL", "Split yaşamış hisselerde değerlendirilebilir normal gün bulunamadı."
-    remaining = int(full_normal_split.iloc[0]["nominal_inconsistency_count"])
-    if remaining == 0:
-        return "PASS", "Split yaşamış hisselerin normal günlerinde kalan tutarsızlık yok."
+        return "PARTIAL", "Gerçek bir split olayı gözlenmedi; unit testleri geçtiği halde gerçek veri doğrulaması yapılamadı."
+
+    evaluable = quality["valid_nominal_ohlc"].notna()
+    if not bool(evaluable.any()):
+        return "FAIL", "Değerlendirilebilir nominal OHLC satırı üretilemedi."
+    if not bool(quality.loc[evaluable, "valid_nominal_ohlc"].any()):
+        return "FAIL", "Değerlendirilebilir nominal OHLC satırlarının tamamı geçersiz."
+
+    missing_rows = int((~evaluable).sum())
+    invalid_rows = int(quality["valid_nominal_ohlc"].eq(False).sum())
+    warning_rows = int(quality["cross_source_price_warning"].eq(True).sum())
     return (
-        "PARTIAL",
-        f"Split ölçeği sistematik olarak düzeldi ancak normal günlerde {remaining} "
-        "tutarsızlık kaldı; kabul toleransı henüz kesinleştirilmedi.",
+        "PASS",
+        "yFinance nominal OHLC üretimi ve iç tutarlılığı doğrulandı; "
+        f"{missing_rows} eksik ve {invalid_rows} geçersiz satır açık durum kodlarıyla "
+        f"dışlanabilir. {warning_rows} çapraz kaynak fiyat farkı yalnız kalite "
+        "uyarısıdır ve kabul sonucunu etkilemez.",
     )
 
 
@@ -810,11 +974,11 @@ def _fetch_with_retry(function: Callable[[], pd.DataFrame], source: str, ticker:
 
 
 def fetch_isyatirim_in_chunks(ticker: str, start: date, end: date) -> pd.DataFrame:
-    """Fetch at most two calendar years per request to reduce provider timeouts."""
+    """Fetch at most one calendar year per request to reduce provider timeouts."""
     chunks: list[pd.DataFrame] = []
     chunk_start = start
     while chunk_start <= end:
-        chunk_end = min(date(chunk_start.year + 1, 12, 31), end)
+        chunk_end = min(date(chunk_start.year, 12, 31), end)
         label = f"{ticker} {chunk_start.isoformat()}..{chunk_end.isoformat()}"
         chunk = _fetch_with_retry(
             lambda start_value=chunk_start, end_value=chunk_end: fetch_stock_data(
@@ -959,49 +1123,33 @@ def write_summary(
 ) -> None:
     aggregate = metrics[metrics["ticker"].eq("__ALL__")]
     overall_observation = quality[
-        quality["date"].between(pd.Timestamp(date(2020, 3, 13)), pd.Timestamp(run_date), inclusive="both")
+        quality["date"].between(
+            pd.Timestamp(date(2020, 3, 13)),
+            pd.Timestamp(run_date),
+            inclusive="both",
+        )
     ]
+    required_is_observed = ISYATIRIM_REQUIRED_COLUMNS.issubset(is_columns)
+    required_yf_observed = YFINANCE_REQUIRED_COLUMNS.issubset(yf_columns)
     total_yf_events = int(overall_observation["has_yfinance_action"].sum())
     total_factor_changes = int(overall_observation["adjustment_factor_changed"].sum())
     scoped_action_rows = len(actions)
-    scoped_both_actions = int(actions["corporate_action_source"].eq("both").sum())
-    scoped_is_only_actions = int(actions["corporate_action_source"].eq("isyatirim_only").sum())
-    scoped_yf_only_actions = int(actions["corporate_action_source"].eq("yfinance_only").sum())
+    corporate_action_windows = int(overall_observation["corporate_action_window"].sum())
     open_with_both_missing = int(
         (overall_observation["has_open"] & overall_observation["both_volumes_missing"]).sum()
     )
-    full_scale = scale_metrics[
-        scale_metrics["period"].eq("full_period")
-        & scale_metrics["day_group"].eq("all_days")
-    ]
-    full_all = full_scale[full_scale["ticker"].eq("__ALL__")]
-    full_provider_evaluable = (
-        int(full_all.iloc[0]["provider_evaluable_count"]) if not full_all.empty else 0
+    d022 = (
+        "UYGULANABİLİR"
+        if required_is_observed
+        and required_yf_observed
+        and "entry_exclusion_reason" in quality
+        else "UYGULANAMADI"
     )
-    full_provider_inconsistent = (
-        int(full_all.iloc[0]["provider_inconsistency_count"]) if not full_all.empty else 0
-    )
-    full_nominal_evaluable = (
-        int(full_all.iloc[0]["nominal_evaluable_count"]) if not full_all.empty else 0
-    )
-    full_nominal_inconsistent = (
-        int(full_all.iloc[0]["nominal_inconsistency_count"]) if not full_all.empty else 0
-    )
-
-    required_is_observed = ISYATIRIM_REQUIRED_COLUMNS.issubset(is_columns)
-    required_yf_observed = YFINANCE_REQUIRED_COLUMNS.issubset(yf_columns)
-    d022_fields_available = required_is_observed and required_yf_observed and not aggregate.empty
-    if d022_fields_available and acceptance_status == "PASS":
-        d022 = "NOMİNAL ÖLÇEK DÖNÜŞÜMÜYLE TEKNİK OLARAK UYGULANABİLİR"
-    elif d022_fields_available:
-        d022 = "DURUM KONTROLLERİ UYGULANABİLİR; FİYAT ÖLÇEĞİ KABULÜ KISMİ"
-    elif d022_fields_available:
-        d022 = "UYGULANABİLİR"
-    else:
-        d022 = "UYGULANAMADI"
     d023 = (
         "UYGULANABİLİR (tespit sinyallerinin bilinen sınırlamalarıyla)"
-        if total_yf_events > 0 and total_factor_changes > 0
+        if total_yf_events > 0
+        and total_factor_changes > 0
+        and "label_exclusion_reason" in quality
         else "UYGULANAMADI"
     )
 
@@ -1020,17 +1168,14 @@ def write_summary(
         "expected_isyatirim_days",
         "yfinance_matching_days",
         "yfinance_date_match_rate",
-        "missing_open_count",
-        "isyatirim_tl_volume_zero_count",
-        "yfinance_share_volume_missing_count",
-        "yfinance_share_volume_zero_count",
-        "both_volumes_missing_count",
+        "missing_nominal_open_count",
+        "missing_nominal_high_low_close_count",
+        "invalid_nominal_ohlc_count",
+        "nominal_ohlc_validity_rate",
+        "split_factor_unavailable_count",
+        "corporate_action_window_count",
+        "cross_source_price_warning_count",
         "open_present_both_volumes_missing_count",
-        "ohlc_inconsistency_count",
-        "hybrid_ohlc_validity_rate",
-        "nominal_open_inconsistency_count",
-        "nominal_open_validity_rate",
-        "source_price_conflict_count",
     ]
     action_columns = [
         "ticker",
@@ -1040,46 +1185,25 @@ def write_summary(
         "yf_future_split_factor",
         "corporate_action_source",
     ]
-    scale_ticker_columns = [
-        "ticker",
-        "ticker_has_split",
-        "provider_evaluable_count",
-        "provider_inconsistency_count",
-        "provider_validity_rate",
-        "nominal_inconsistency_count",
-        "nominal_validity_rate",
-        "validity_rate_change",
-    ]
-    scale_day_columns = [
-        "day_group",
-        "row_count",
-        "provider_inconsistency_count",
-        "provider_validity_rate",
-        "nominal_inconsistency_count",
-        "nominal_validity_rate",
-        "provider_to_nominal_improved_count",
-        "provider_to_nominal_worsened_count",
-    ]
     example_columns = [
         "ticker",
         "date",
-        "yf_provider_open",
-        "yf_future_split_factor",
         "yf_nominal_open",
         "is_raw_low",
         "is_raw_high",
         "nominal_open_range_gap",
         "nominal_open_range_gap_pct",
     ]
-    full_ticker_scale = full_scale[
-        full_scale["ticker"].isin(FULL_PERIOD_TICKERS)
-    ]
-    full_day_scale = scale_metrics[
-        scale_metrics["period"].eq("full_period")
-        & scale_metrics["ticker"].eq("__ALL__")
-    ]
 
-    text = f"""# Kaynak Kabul Testi Özeti
+    next_task = (
+        "D022 ve D023 durum kodlarını modüler veri temizleme koduna taşımak; "
+        "ardından değişmez ham yFinance yanıtı/split sürümleme altyapısını kurmak."
+        if acceptance_status == "PASS"
+        else "Sağlayıcı erişimi kararlı olduğunda eksiksiz gerçek veri kabul "
+        "koşusunu yeniden çalıştırmak; kabul verilmeden genel veri/label akışına geçmemek."
+    )
+
+    text = f"""# Tek Fiyat Kaynağı Kabul Testi Özeti
 
 **Çalıştırma tarihi:** {run_date.isoformat()}
 
@@ -1089,9 +1213,18 @@ def write_summary(
 
 **Sonuç gerekçesi:** {acceptance_reason}
 
-## Amaç
+## Ana fiyat kaynağı
 
-İş Yatırım/`isyatirimhisse` ana fiyat-takvim kaynağı ile yFinance tamamlayıcı açılış, adet hacmi ve kurumsal işlem kaynağının D022 ve D023 kurallarını destekleyip desteklemediğini gerçek veride ölçmek; yFinance geçmiş OHLC değerlerini gelecekteki split oranlarıyla dönemin nominal fiyat ölçeğine geri taşıma yaklaşımını sınamak.
+İlk sürümde giriş, label, çıkış, OHLC geçerlilik ve tavan hesabı için tek fiyat kaynağı **yFinance nominal OHLC** serisidir. İş Yatırım fiyatları ana işlem hesabına katılmaz; yalnız `cross_source_price_warning` kalite uyarısı, kurumsal işlem sinyali ve denetim amacıyla kullanılır.
+
+Orijinal yFinance değerleri `yf_provider_open/high/low/close` alanlarında değiştirilmeden tutulur. Nominal dönüşüm:
+
+```text
+yf_future_split_factor[t] = t tarihinden kesinlikle sonra gerçekleşen geçerli split oranlarının çarpımı
+yf_nominal_price[t] = yf_provider_price[t] × yf_future_split_factor[t]
+```
+
+Split gününün kendi oranı aynı günün fiyatına uygulanmaz. Aynı faktör open, high, low ve close alanlarının tamamına uygulanır.
 
 ## Kullanılan ortam ve kütüphane sürümleri
 
@@ -1108,97 +1241,67 @@ def write_summary(
 
 {period_lines}
 
-İş Yatırım ve yFinance verileri, dönem sınırı hesaplarını güvenli yapmak için `2020-03-01` tarihinden `{run_date.isoformat()}` tarihine kadar çekildi; metrikler yalnızca yukarıdaki kapsamlarda hesaplandı. yFinance `end` parametresi hariç olduğundan kapsayıcı bitiş tarihine bir gün eklendi. Zaman dilimli yFinance indeksleri, saat dilimi dönüştürülmeden yerel takvim tarihine indirildi.
+Ana BİST işlem takvimi İş Yatırım'dan kuruldu. yFinance `end` sınırının hariç olması ve Europe/Istanbul yerel tarihleri açıkça ele alındı.
 
-## Gerçek veri sütunları
+## Kaynak alanları
 
-### İş Yatırım / isyatirimhisse
+- İş Yatırım zorunlu alanları mevcut: **{'evet' if required_is_observed else 'hayır'}**
+- yFinance zorunlu alanları mevcut: **{'evet' if required_yf_observed else 'hayır'}**
+- İş Yatırım sütunları: `{', '.join(is_columns)}`
+- yFinance sütunları: `{', '.join(yf_columns)}`
 
-`{', '.join(is_columns)}`
+Bu kabul çalıştırıcısı ham yanıtları repoya yazmaz. D024'ün gerektirdiği değişmez ham yanıt/split sürümleme ve yeniden indirme farkı tespiti, veri toplama altyapısında uygulanması gereken açık tekrarlanabilirlik işidir.
 
-### yFinance
+## Nominal OHLC iç tutarlılığı ve eksikler
 
-`{', '.join(yf_columns)}`
+Ana kontrol yalnız tek kaynaklı nominal alanlarla yapılır:
 
-Ham yanıtların tamamı repoya kaydedilmedi. İş Yatırım `HG_*` alanları ham; `HGDG_*` alanları düzeltilmiş seri olarak eşlendi. Ana işlem takvimi `HGDG_TARIH` alanından kuruldu. yFinance çağrılarında açıkça `auto_adjust=False` ve `actions=True` kullanıldı. Orijinal yFinance OHLC değerleri `yf_provider_*`, dönemin nominal ölçeğine geri taşınan karşılıkları `yf_nominal_*` alanlarında ayrı tutuldu.
-
-## İş Yatırım sonuçları
-
-Gözlenen zorunlu sütunların tamamı mevcut: **{'evet' if required_is_observed else 'hayır'}**. Ham `high`, `low`, `close`, ağırlıklı ortalama fiyat ve TL hacmi sırasıyla `HG_MAX`, `HG_MIN`, `HG_KAPANIS`, `HG_AOF`, `HG_HACIM/HGDG_HACIM`; düzeltilmiş karşılıkları `HGDG_MAX`, `HGDG_MIN`, `HGDG_KAPANIS`, `HGDG_AOF` alanlarından alındı. `PD`, `PD_USD`, `HAO_PD`, `HAO_PD_USD` piyasa değeri alanları da gözlendi.
-
-## yFinance sonuçları
-
-Gözlenen zorunlu sütunların tamamı mevcut: **{'evet' if required_yf_observed else 'hayır'}**. Sağlayıcı açılışı ve adet hacmi `Open` ve `Volume` alanlarından, kurumsal işlem kayıtları `Dividends` ve `Stock Splits` alanlarından alındı. `Adj Close` ayrı alan olarak korundu. Nominal fiyat dönüşümü `yf_nominal_price[t] = yf_provider_price[t] × t tarihinden sonra gerçekleşen geçerli split oranlarının çarpımı` formülünü kullanır; split gününün kendi oranı o günün fiyatına uygulanmaz.
-
-## Tarih eşleşme sonuçları
+```text
+yf_nominal_low <= yf_nominal_open <= yf_nominal_high
+yf_nominal_low <= yf_nominal_close <= yf_nominal_high
+```
 
 {_markdown_table(aggregate, metric_columns)}
 
-Oranların paydası İş Yatırım işlem günü sayısıdır. Hisse bazındaki ayrıntılar `source_acceptance_metrics.csv` dosyasındadır.
+Tekil eksik veya geçersiz satırlar `NO_OPEN`/`INVALID_OHLC` durumlarıyla `NA` bırakılabilir ve tek başına kabulü başarısız yapmaz. Hisse bazındaki ayrıntılar `source_acceptance_metrics.csv` dosyasındadır.
 
-## Açılış ve hacim eksiklikleri
+## Hacim sonuçları
 
-Açılış mevcutken iki hacmin de eksik olduğu benzersiz İş Yatırım takvim kaydı: **{open_with_both_missing}**. Eksik, sıfır, tek kaynak eksik ve tek kaynak sıfır/diğeri pozitif sayıları hisse ve dönem bazında metrik CSV'sinde tutuldu.
+Açılış mevcutken iki hacmin de eksik olduğu benzersiz takvim kaydı: **{open_with_both_missing}**. İş Yatırım TL hacmi ve yFinance pay adedi birlikte sıfırsa `NO_TRADE`; tek kaynak eksik/sıfırsa `SOURCE_VOLUME_CONFLICT` kalite uyarısı üretilir. İki hacim de eksikken open mevcutsa D022 uyarınca yeni bir kesin karar verilmez.
 
-## Hibrit OHLC ölçek kontrolü
+## D022 ve D023 uygulanabilirliği
 
-Kontrol `İş Yatırım HG_MIN <= yFinance open <= İş Yatırım HG_MAX` biçimindedir. Beş hisselik tam dönemde sağlayıcı fiyatıyla değerlendirilebilen **{full_provider_evaluable}** satırın **{full_provider_inconsistent}** tanesi tutarsızdı. Split faktörüyle nominal ölçeğe dönüşümden sonra değerlendirilebilen **{full_nominal_evaluable}** satırın **{full_nominal_inconsistent}** tanesi tutarsız kaldı.
-
-### Beş hisse bazında dönüşüm öncesi/sonrası
-
-{_markdown_table(full_ticker_scale, scale_ticker_columns)}
-
-### Normal günler ve kurumsal işlem günleri
-
-Gruplar örtüşebilir: bir split veya temettü günü aynı zamanda `adjustment_factor_change_day` olabilir. Kaynak ölçeği kabulü esas olarak `normal_day` üzerinden değerlendirilir.
-
-{_markdown_table(full_day_scale, scale_day_columns)}
-
-### En büyük kalan normal-gün uyuşmazlıkları
-
-{_markdown_table(remaining_examples, example_columns)}
-
-Ayrıntılı hisse, dönem ve gün grubu karşılaştırmaları `source_scale_normalization.csv` dosyasındadır. Sabit bir fiyat veya oran kabul eşiği uygulanmadı.
-
-## Kurumsal işlem tespiti sonuçları
-
-- İndirilen 10 hisselik çalışma verisindeki benzersiz yFinance temettü/split/diğer action günü: **{total_yf_events}**
-- İndirilen 10 hisselik çalışma verisindeki İş Yatırım düzeltilmiş/ham kapanış faktörü değişim günü: **{total_factor_changes}**
-- Tanımlı dört test kapsamına giren benzersiz olay satırı: **{scoped_action_rows}** (`both={scoped_both_actions}`, `isyatirim_only={scoped_is_only_actions}`, `yfinance_only={scoped_yf_only_actions}`)
-- Faktör değişimi toleransı: `rtol={ADJUSTMENT_FACTOR_RTOL}`, `atol={ADJUSTMENT_FACTOR_ATOL}`. Bu yalnızca kayan nokta/yuvarlama gürültüsü toleransıdır; kabul koşusundaki kaynak yuvarlama gürültüsü gerçek olaylardan ayrı tutulacak şekilde seçildi.
+- **D022: {d022}.** Giriş fiyatı `yf_nominal_open` üzerinden değerlendirilir. `NO_OPEN`, `NO_TRADE` ve `INVALID_OHLC` kodları üretilebilir.
+- **D023: {d023}.** `T+1–T+3` içinde kurumsal işlem sinyali bulunan **{corporate_action_windows}** tahmin satırı `CORPORATE_ACTION_WINDOW` ile `NA` yapılabilir.
+- Kapsama giren benzersiz action satırı: **{scoped_action_rows}**; yFinance action günü: **{total_yf_events}**; İş Yatırım düzeltme faktörü değişim günü: **{total_factor_changes}**.
 
 {_markdown_table(actions.head(30), action_columns)}
 
-Olay raporu her `ticker/date` için tek satır tutar ve satırın ait olduğu test dönemlerini ayrıca gösterir. İki kaynak aynı gün sinyal verirse `both`, yalnız biri verirse `isyatirim_only` veya `yfinance_only` olarak işaretlenir.
+## Çapraz kaynak fiyat kalite uyarıları
 
-## Kaynak uyuşmazlıkları
+İş Yatırım ham fiyatları yFinance nominal fiyatlarıyla yalnız kalite kontrolü için karşılaştırıldı. Farklar `cross_source_price_warning` üretir; satırı otomatik dışlamaz ve `PASS/PARTIAL/FAIL` sonucunu etkilemez. Sabit bir yüzdesel veya fiyat-adımı eşiği eklenmedi.
 
-İş Yatırım ham `high`, `low`, `close` ile hem orijinal yFinance sağlayıcı fiyatları hem de nominal ölçeğe dönüştürülmüş fiyatlar için mutlak ve yüzdesel farklar ayrı kaydedildi. `source_price_conflict` ve `nominal_source_price_conflict` yalnızca `atol={PRICE_COMPARE_ATOL}` sayısal eşitlik toleransını aşan farkları belirtir; BİST fiyat adımı veya kesin kabul toleransı uygulanmadı. Nominal açılışın İş Yatırım günlük aralığı dışında kalan mesafesi de ayrıca ölçüldü.
+En büyük normal-gün nominal-open/İş Yatırım aralık farklarından örnekler:
 
-## D022 ve D023 kurallarının uygulanabilirliği
+{_markdown_table(remaining_examples, example_columns)}
 
-- **D022: {d022}.** Gerekli açılış ve iki hacim alanı gözlendi. Split faktörü sistematik tarihsel ölçek farkını azalttı; ancak kalan normal-gün uyuşmazlıkları için kabul toleransı kesinleşmeden genel veri toplama veya label akışına geçilmedi. İki hacim de eksikken açılışın mevcut olduğu durumlar otomatik karara bağlanmadı.
-- **D023: {d023}.** yFinance action alanları ile İş Yatırım `adjusted_close/raw_close` faktör değişimleri ayrı ve ortak sinyal olarak üretilebiliyor. Bu sinyaller tahmin anı feature'ı değildir; yalnız label uygunluğu, giriş geçerliliği ve backtest kontrolü içindir.
-
-## Bilinen sınırlamalar
-
-- İş Yatırım ve yFinance ham fiyatları birebir aynı olmayabilir; kesin fiyat toleransı bu görevde kararlaştırılmadı.
-- Nominal dönüşüm yalnız yFinance'ın raporladığı geçerli split oranlarını kullanır; eksik veya sonradan revize edilen action geçmişi eski nominal fiyatları değiştirebilir.
-- Kalan küçük veya büyük normal-gün uyuşmazlıkları için kabul eşiği bu görevde belirlenmedi.
-- Faktör değişimi, kurumsal işlemin türünü tek başına kanıtlamaz ve yuvarlama hassasiyetinden etkilenebilir.
-- yFinance action geçmişinin sağlayıcı revizyonları, bugünkü sorguda geçmiş olay bilgisini gösterebilir; bu bilgi geçmiş tahmin anında biliniyormuş gibi feature'a taşınamaz.
-- KAP veya başka bir yeni veri kaynağı kullanılmadı; tespit edilemeyen serbest marj durumları bilinen sınırlamadır.
-- Çalıştırma gününün henüz kapanmamış veya işlem dışı olması halinde güncel dönemin son gözlemi son tamamlanmış işlem günüdür.
+Ayrıntılı karşılaştırmalar `source_scale_normalization.csv` dosyasındadır. Bunlar ana OHLC başarı metriği değildir.
 
 ## Veri sızıntısı kontrolü
 
-- `T+1–T+3` işlem yapılabilirlik ve kurumsal işlem sinyalleri model feature'ı üretilmeden yalnız kabul/label/backtest uygunluğu bağlamında analiz edildi.
-- Tavan fiyatı hesaplanmadı; düzeltilmiş fiyatlar tavan hesabında kullanılmadı.
-- Ham/düzeltilmiş faktör yalnız veri kalite ve kurumsal işlem sinyali olarak incelendi.
-- Gelecekteki split bilgisi yalnız tarihsel fiyat birimini geri kurmak için kullanıldı; `yf_future_split_factor` model feature'ı değildir ve tahmin olasılığını etkilemeyecektir.
-- Kurumsal işlem penceresi yalnız label ve backtest uygunluğu içindir; gelecekte oluşan action kayıtları tahmin anında mevcut bilgi olarak yorumlanmadı.
-- Canlı tahminde geçmiş fiyatların sonradan değişmemesi için ham kaynak yanıtlarının veya normalize edilmiş değerlerin veri sürümüyle saklanması gerekir.
-- Bu görev model, feature, label veya backtest kodu üretmedi.
+- `yf_future_split_factor` ve action alanları `MODEL_FEATURE_COLUMNS` içinde değildir; LightGBM'e ve tahmin sinyaline verilmez.
+- Gelecekteki split bilgisi yalnız geçmiş fiyat birimini dönemin nominal ölçeğine geri kurar.
+- Aynı split faktörü open, high, low ve close'a birlikte uygulanır; dönüşüm oran ilişkilerini değiştirmez.
+- `T+1–T+3` kurumsal işlem penceresi yalnız label/backtest uygunluğunda `NA` üretir, tahmin feature'ı değildir.
+- İş Yatırım düzeltilmiş/ham faktörü ve çapraz fiyat farkı yalnız kalite alanıdır.
+- Bu görev model feature'ı, label veya backtest sonucu üretmez.
+
+## Tekrarlanabilirlik ve bilinen sınırlamalar
+
+- yFinance geçmiş action ve fiyat değerlerini sonradan revize edebilir.
+- Ham yFinance yanıtları ve split kayıtları değişmez veri sürümleriyle saklanmadan eski koşular birebir yeniden üretilemez.
+- Bu kabul çalıştırıcısı ham kaynakları sürümlemediği için yeniden indirme farkı henüz otomatik tespit edilmez.
+- İş Yatırım düzeltme faktörü olay türünü tek başına kanıtlamaz; KAP ilk sürümün zorunlu kaynağı değildir.
 
 ## Başarısız veya eksik kalan kontroller
 
@@ -1207,14 +1310,12 @@ Olay raporu her `ticker/date` için tek satır tutar ve satırın ait olduğu te
 ## Açık sorular
 
 - Açılış mevcutken iki hacim alanının da eksik olduğu kayıtların nihai davranışı ayrı karara ihtiyaç duyar.
-- Kaynak ham fiyat uyuşmazlıkları için fiyat seviyesi/tarih etkili tolerans henüz kesinleştirilmedi.
-- Raporlanan dönüşüm sonrası normal-gün geçerlilik oranı hangi toleransla nihai kabul edilecek?
-- `yf_future_split_factor` yaklaşımı veri sürümleme şartıyla kalıcı normalizasyon yöntemi olarak kabul edilecek mi?
 - İş Yatırım faktör değişim sinyalinin olay tarihi ve türü için ek doğrulama yöntemi gerekebilir.
+- Ham veri sürümleme ve sağlayıcı revizyon farkı tespiti veri toplama altyapısında henüz uygulanmadı.
 
 ## Önerilen sıradaki görev
 
-Kullanıcı ve ChatGPT'nin dönüşüm sonrası oranları ve kalan örnekleri değerlendirerek fiyat ölçeği normalizasyonu için nihai kabul ölçütünü kesinleştirmesi. Kaynak kabul sonucu `PASS` olmadan genel veri toplama veya label altyapısına geçilmemelidir.
+{next_task}
 """
     path.write_text(text, encoding="utf-8")
 
@@ -1263,7 +1364,6 @@ def main() -> int:
         required_yf=required_yf,
         errors=errors,
         quality=quality,
-        scale_metrics=scale_metrics,
     )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)

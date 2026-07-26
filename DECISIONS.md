@@ -268,6 +268,8 @@ Veri toplama, veri birleştirme, label üretimi, feature engineering, veri kalit
 **Tarih:**  
 2026-07-25
 
+**Revizyon notu:** D017'nin hibrit fiyat kaynağı görev dağılımı D024 ile revize edilmiştir; karar geçmişi korunmuştur.
+
 ### D018 — Tarihsel Veri Başlangıcı
 
 **Karar:**  
@@ -428,6 +430,8 @@ Veri temizleme, tavan fiyatı hesaplama, işlem yapılabilirlik, label, backtest
 **Tarih:**  
 2026-07-26
 
+**Revizyon notu:** D021'in İş Yatırım ham kapanışını baz fiyat ve yFinance sağlayıcı açılışını karşılaştırma fiyatı olarak kullanan bölümleri D024 ile revize edilmiştir; karar geçmişi korunmuştur.
+
 ### D022 — T+1 Temel İşlem Yapılabilirlik ve Hacim Kontrolü
 
 **Karar:**  
@@ -518,6 +522,74 @@ Belirsiz kayıtları normal işlem olarak kullanmak yerine `NA` bırakmak, kurum
 Veri temizleme, kurumsal işlem tespiti, tavan hesabı, label üretimi, backtest ve veri kalite raporları.
 
 **Tarih:**  
+2026-07-26
+
+### D024 — Tek Fiyat Kaynağı ve yFinance Nominal Fiyat Normalizasyonu
+
+**Karar:**
+İlk sürümde giriş, label, çıkış ve tavan fiyatı hesaplarında kullanılan open, high, low ve close değerlerinin tamamı yFinance'tan alınacaktır.
+
+yFinance tarafından sağlanan geçmiş OHLC değerleri splitler nedeniyle güncel fiyat ölçeğine taşınabildiği için orijinal sağlayıcı fiyatları değişmeden saklanacak ve tarihsel nominal fiyatlar yFinance `Stock Splits` verileriyle ayrıca oluşturulacaktır.
+
+Nominal fiyat dönüşümü:
+
+```text
+yf_nominal_price[t]
+    =
+yf_provider_price[t]
+    ×
+t tarihinden sonra gerçekleşen geçerli split oranlarının kümülatif çarpımı
+```
+
+Split gününün kendi oranı aynı günün fiyatına uygulanmayacaktır.
+
+Ana fiyat alanları:
+
+```text
+yf_nominal_open
+yf_nominal_high
+yf_nominal_low
+yf_nominal_close
+```
+
+Bu alanlar şu işlemlerde kullanılacaktır:
+
+- `T+1` giriş fiyatı
+- `T+1–T+3` high değerleriyle label hesabı
+- `T+3` kapanış çıkışı
+- Önceki kapanıştan tavan fiyatı hesabı
+- Tavan açılış kontrolü
+- OHLC tutarlılık kontrolü
+
+Tavan hesabında önceki geçerli işlem gününün `yf_nominal_close` değeri baz fiyat olacak; `yf_nominal_open`, fiyat adımına aşağı yuvarlanan `%10` tahmini üst limite yalnız küçük kayan nokta toleransıyla karşılaştırılacaktır. Bir tam fiyat adımı toleransı kullanılmayacaktır.
+
+İş Yatırım fiyatları ana fiyat hesabında kullanılmayacaktır. İş Yatırım ana işlem takvimi, TL işlem hacmi, endeks, ağırlıklı ortalama fiyat, piyasa değeri, halka açık piyasa değeri ve veri kalite çapraz kontrolü için kullanılmaya devam edecektir.
+
+İş Yatırım ile yFinance fiyat uyuşmazlıkları label veya backtest satırını otomatik dışlamayacak; `cross_source_price_warning` veri kalite uyarısı olarak saklanacaktır.
+
+Split normalizasyonunda gelecekte gerçekleşen split oranlarının kullanılması yalnız geçmiş fiyat birimini dönemin nominal ölçeğine geri kurmak içindir. Bu oranlar:
+
+- Model feature'ı yapılmayacaktır.
+- LightGBM'e verilmeyecektir.
+- Tahmin olasılığını etkilemeyecektir.
+- Alım satım sinyali olarak kullanılmayacaktır.
+- Yalnız veri normalizasyonu amacıyla kullanılacaktır.
+
+Aynı split faktörü open, high, low ve close alanlarının tamamına uygulanacaktır. D023 gereği `T+1–T+3` penceresinde kurumsal işlem bulunan satırlar `CORPORATE_ACTION_WINDOW` ile `NA` bırakılacaktır.
+
+Ham yFinance yanıtları ve normalizasyonda kullanılan split verileri sürümlenerek saklanacaktır. Sağlayıcının geçmiş verileri daha sonra değiştirmesi halinde geçmiş deneylerin tekrarlanabilirliği korunacaktır.
+
+Bu karar D017'deki fiyat kaynağı görev dağılımını ve D021'deki tavan baz fiyatı kaynağını revize eder. D022'deki açılış kontrolleri yFinance nominal açılışıyla uygulanır; D023'ün kurumsal işlem penceresi kuralları korunur.
+
+**Gerekçe:**
+Kaynak kabul testinde yFinance open ile İş Yatırım ham high, low ve close fiyatlarının split öncesi dönemlerde farklı fiyat ölçeklerinde bulunduğu görülmüştür.
+
+Tüm OHLC alanlarının aynı kaynaktan alınması giriş, label ve çıkış fiyatlarının aynı ölçekte kalmasını sağlar. İş Yatırım'ın açılış fiyatı sağlamaması nedeniyle tüm fiyat alanları için İş Yatırım'ın tek kaynak olarak kullanılması mümkün değildir.
+
+**Etkilenen alanlar:**
+Veri toplama, fiyat normalizasyonu, tavan hesabı, işlem yapılabilirlik, label üretimi, backtest, veri kalite kontrolü ve tekrarlanabilirlik.
+
+**Tarih:**
 2026-07-26
 
 ## Henüz Kesinleşmemiş Kararlar

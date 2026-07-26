@@ -39,6 +39,14 @@ Bu seçim survivorship bias oluşturur. Bu nedenle ilk sürüm sonuçları tam p
 
 Point-in-time tarihsel evren, sade pipeline çalışır hale geldikten sonra ayrı bir geliştirme ve karşılaştırmalı deney konusu olacaktır.
 
+## İlk Sürüm Veri Kaynakları
+
+yFinance, bütün fiyat bağımlı hesapların tek kaynağıdır. Open, high, low ve close değerleri sağlayıcının `Stock Splits` kayıtlarıyla dönemin nominal fiyat ölçeğine geri taşınır; giriş, label, çıkış, OHLC geçerlilik ve tavan hesabında yalnız bu yFinance nominal OHLC serisi kullanılır.
+
+Orijinal yFinance sağlayıcı fiyatları ile nominal fiyatlar ayrı saklanır. Split normalizasyonu yalnız tarihsel fiyat birimi dönüşümüdür; split faktörü model feature'ı veya tahmin sinyali değildir.
+
+İş Yatırım ana BİST işlem takvimi, TL işlem hacmi, endeks verileri, ağırlıklı ortalama fiyat, piyasa değeri, halka açık piyasa değeri ve kurumsal işlem/veri kalite sinyalleri için kullanılır. İş Yatırım fiyatları yFinance fiyatlarıyla label veya backtest hesabında karıştırılmaz; yalnız çapraz veri kalite uyarısı üretir.
+
 ## İlk Sürümde Kullanılmayacaklar
 
 - XGBoost ve diğer benchmark modeller
@@ -69,11 +77,9 @@ Temel metrikler:
 
 ## Mevcut Aşama
 
-Ana model dönemi `2020-03-13` tarihinde başlar.
+Ana model dönemi `2020-03-13` tarihinde başlar. Standart normal adi paylarda tavan açılış `%10` marj ve içeri doğru fiyat adımı yuvarlamasıyla hesaplanır; baz fiyat ve açılış karşılaştırması yFinance nominal OHLC serisinden alınır.
 
-Standart normal adi paylarda tavan açılış `%10` marj ve içeri doğru fiyat adımı yuvarlamasıyla hesaplanır.
-
-Sıradaki aşama tarihsel hisse evreni ve özel işlem durumu istisnalarıdır.
+Hibrit fiyat hesabından vazgeçilmiş, bütün fiyat alanları için yFinance nominal OHLC tek kaynak olarak kesinleştirilmiştir. Sıradaki aşama bu yapının yerel kabul testi ve ardından veri toplama/temizleme altyapısıdır.
 
 Gerçek veri sütunları tam olarak belgelenmediği için feature listesi henüz kesin değildir.
 

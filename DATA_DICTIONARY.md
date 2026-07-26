@@ -18,7 +18,7 @@ Bu sözlük yalnız kaynak kabul testinde gerçekten gözlenen sütunları ve ka
 | `adjusted_weighted_average` | `HGDG_AOF` | `float64` | Düzeltilmiş | Düzeltilmiş ağırlıklı ortalama fiyat | T tarihinde sorgulanabilir; point-in-time güvenli feature olduğu doğrulanmadı | Kaynak doğrulama; ilk sürüm labelında kullanılmıyor | Eksik olarak korunur | Pozitiflik ve ham karşılığıyla katsayı tutarlılığı |
 | `adjusted_low` | `HGDG_MIN` | `float64` | Düzeltilmiş | Düzeltilmiş günlük en düşük fiyat | T tarihinde sorgulanabilir; gelecekteki düzeltmelerden etkilenebilir | Kaynak doğrulama; tavan ve ham label hesabında kullanılmaz | Eksik olarak korunur | Pozitiflik, düzeltilmiş OHLC sınırları ve katsayı tutarlılığı |
 | `adjusted_high` | `HGDG_MAX` | `float64` | Düzeltilmiş | Düzeltilmiş günlük en yüksek fiyat | T tarihinde sorgulanabilir; gelecekteki düzeltmelerden etkilenebilir | Kaynak doğrulama; tavan ve ham label hesabında kullanılmaz | Eksik olarak korunur | Pozitiflik, düzeltilmiş OHLC sınırları ve katsayı tutarlılığı |
-| `tl_volume` | `HGDG_HACIM` | `float64` | Hacim; fiyat düzeltmesi uygulanmıyor | Günlük TL işlem hacmi; kabul örneğinde `HG_HACIM` ile aynı değer | İlgili günün kapanışı sonrasında mevcut | D022 işlem gerçekleşme ve veri kalite kontrolü | yFinance hacmiyle birlikte değerlendirilir; iki kaynak da eksikse açık durum | Negatif olmama, sıfır/eksik ve kaynaklar arası hacim bayrakları |
+| `is_tl_volume` | `HGDG_HACIM` | `float64` | Hacim; fiyat düzeltmesi uygulanmıyor | Günlük TL işlem hacmi; kabul örneğinde `HG_HACIM` ile aynı değer | İlgili günün kapanışı sonrasında mevcut | D022 işlem gerçekleşme ve veri kalite kontrolü | yFinance hacmiyle birlikte değerlendirilir; iki kaynak da eksikse açık durum | Negatif olmama, sıfır/eksik ve kaynaklar arası hacim bayrakları |
 | `index_code` | `END_ENDEKS_KODU` | `object` | Referans | Yanıtta eşlik eden endeks kodu | İlgili gün sonrasında mevcut; kullanım kararı verilmedi | Kabul testinde kullanılmıyor | Eksik olarak korunur | Kod sürekliliği ve tarih eşleşmesi |
 | `index_timestamp` | `END_TARIH` | `int64` | Referans | Endeks kaydının milisaniye epoch zaman damgası | İlgili gün sonrasında mevcut; kullanım kararı verilmedi | Kabul testinde kullanılmıyor | Eksikse endeks referansı kurulmaz | `date` ile yerel takvim uyumu |
 | `index_session` | `END_SEANS` | `int64` | Referans | Endeks seans kodu | İlgili gün sonrasında mevcut; kullanım kararı verilmedi | Kabul testinde kullanılmıyor | Eksik olarak korunur | Beklenen kod kümesi ve tarih tutarlılığı |
@@ -44,39 +44,27 @@ Bu sözlük yalnız kaynak kabul testinde gerçekten gözlenen sütunları ve ka
 | `usd_based_high` | `DOLAR_BAZLI_MAX` | `float64` | Türetilmiş | Kaynak tarafından dolar bazına çevrilmiş en yüksek fiyat | İlgili gün sonrasında mevcut; feature kararı verilmedi | Kabul testinde kullanılmıyor | Eksik olarak korunur | Ham yüksek ve kurla ölçek tutarlılığı |
 | `usd_based_weighted_average` | `DOLAR_BAZLI_AOF` | `float64` | Türetilmiş | Kaynak tarafından dolar bazına çevrilmiş ağırlıklı ortalama fiyat | İlgili gün sonrasında mevcut; feature kararı verilmedi | Kabul testinde kullanılmıyor | Eksik olarak korunur | Ham AOF ve kurla ölçek tutarlılığı |
 
-## yFinance
+## D024 Tek Fiyat Kaynağı Alanları
 
-Çağrı kodu `.IS` uzantılı sembollerle, `auto_adjust=False` ve `actions=True` parametreleriyle çalıştırıldı. Kaynak indeksinin gözlenen zaman dilimi `Europe/Istanbul`; `end` parametresi hariçtir. `auto_adjust=False` olmasına rağmen geçmiş OHLC ölçeğinin splitler için geriye taşındığı gerçek veri karşılaştırmasında gözlendi.
+yFinance çağrıları `.IS` uzantılı semboller, `auto_adjust=False` ve `actions=True` ile yapılır. `end` parametresi hariçtir; gözlenen indeks zaman dilimi `Europe/Istanbul` olarak korunur. Sağlayıcının geçmiş OHLC değerlerini splitler için güncel ölçeğe taşıyabildiği gerçek veride gözlendiğinden provider ve nominal alanlar ayrı saklanır.
 
-| Alan adı | Kaynak sütun adı | Veri tipi | Ham/düzeltilmiş | Anlamı | Tahmin anında kullanılabilirlik | Label/backtest kullanım amacı | Eksik değer davranışı | Veri kalite kontrolü |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `provider_open` | `Open` | `float64` | Yahoo sağlayıcı; geçmiş split ölçeğine taşınmış | yFinance'ın değiştirilmeden korunan günlük açılış fiyatı | T günü açılıştan sonra mevcut; `T+1` değeri T kapanışında mevcut değildir | Nominal dönüşüm girdisi ve dönüşüm öncesi D022 kalite karşılaştırması | Eksik veya pozitif değilse `NO_OPEN` ve label `NA` | Pozitiflik, yerel tarih eşleşmesi ve dönüşüm öncesi `low <= open <= high` kontrolü |
-| `provider_high` | `High` | `float64` | Yahoo sağlayıcı; geçmiş split ölçeğine taşınmış | yFinance'ın değiştirilmeden korunan günlük en yüksek fiyatı | İlgili gün kapanışı sonrasında mevcut | Nominal dönüşüm girdisi ve İş Yatırım ham yüksek farkı | Eksik olarak korunur | yFinance OHLC sınırları ve İş Yatırım dönüşüm öncesi farkı |
-| `provider_low` | `Low` | `float64` | Yahoo sağlayıcı; geçmiş split ölçeğine taşınmış | yFinance'ın değiştirilmeden korunan günlük en düşük fiyatı | İlgili gün kapanışı sonrasında mevcut | Nominal dönüşüm girdisi ve İş Yatırım ham düşük farkı | Eksik olarak korunur | yFinance OHLC sınırları ve İş Yatırım dönüşüm öncesi farkı |
-| `provider_close` | `Close` | `float64` | Yahoo sağlayıcı; geçmiş split ölçeğine taşınmış | yFinance'ın değiştirilmeden korunan günlük kapanış fiyatı | İlgili gün kapanışı sonrasında mevcut | Nominal dönüşüm girdisi ve İş Yatırım ham kapanış farkı | Eksik olarak korunur | yFinance OHLC sınırları ve İş Yatırım dönüşüm öncesi farkı |
-| `adjusted_close` | `Adj Close` | `float64` | Düzeltilmiş | Yahoo'nun temettü/split etkileriyle düzeltilmiş kapanışı | Bugünkü sorguda geçmişe uygulanır; point-in-time feature değildir | Kaynak kabul ve kalite karşılaştırması; ham tavan hesabında kullanılmaz | Eksik olarak korunur | `Close` oranı, pozitiflik ve action tarihleriyle tutarlılık |
-| `share_volume` | `Volume` | `int64` | Adet hacmi | İşlem gören pay adedi | İlgili gün kapanışı sonrasında mevcut; `T+1` değeri T kapanışında mevcut değildir | D022 işlem gerçekleşme ve veri kalite kontrolü | İş Yatırım TL hacmiyle birlikte değerlendirilir | Negatif olmama, sıfır/eksik ve diğer hacim pozitif bayrağı |
-| `dividends` | `Dividends` | `float64` | Action | Hisse başına temettü olayı/değeri | Tarihsel sorguda görülür; duyuru zamanındaki kullanılabilirlik doğrulanmadı | D023 `CORPORATE_ACTION_WINDOW`; feature değildir | Eksik action yok kabul edilmez; kaynak satırı yoksa bilinmiyor | Sıfır dışı olay tarihi, İş Yatırım faktör değişimiyle aynı gün karşılaştırması |
-| `stock_splits` | `Stock Splits` | `float64` | Action | Bölünme oranı/olayı | Tarihsel sorguda görülür; duyuru zamanındaki kullanılabilirlik doğrulanmadı | D023 `CORPORATE_ACTION_WINDOW` ve fiyat ölçeği incelemesi; feature değildir | Eksik action yok kabul edilmez; kaynak satırı yoksa bilinmiyor | Sıfır dışı oran, pozitiflik ve İş Yatırım faktör değişimiyle aynı gün karşılaştırması |
-
-## yFinance Nominal Ölçek Alanları
-
-Bu alanlar kaynak sütunu değildir. Sağlayıcı değerlerini değiştirmeden, yFinance `Stock Splits` geçmişinden yalnız tarihsel fiyat birimini geri kurmak için üretilir. Formül:
-
-```text
-yf_future_split_factor[t] = t tarihinden sonra gerçekleşen geçerli split oranlarının çarpımı
-yf_nominal_price[t] = yf_provider_price[t] × yf_future_split_factor[t]
-```
-
-Split gününün kendi oranı o günün faktörüne eklenmez. `0`, eksik, sonsuz, negatif veya sayıya çevrilemeyen oranlar nötr `1` olarak ele alınır. Ticker grupları birbirinden bağımsız hesaplanır.
-
-| Alan adı | Kaynak sütun adı | Veri tipi | Ham/düzeltilmiş | Anlamı | Tahmin anında kullanılabilirlik | Label/backtest kullanım amacı | Eksik değer davranışı | Veri kalite kontrolü |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `yf_future_split_factor` | `Stock Splits` geçmişinden türetilir | `float64` | Tarihsel birim dönüşümü | İlgili tarihten kesinlikle sonra gerçekleşen geçerli split oranlarının kümülatif çarpımı | Gelecekteki olayları içerdiği için tahmin anında kullanılamaz ve feature değildir | Yalnız tarihsel sağlayıcı fiyatını döneminin nominal birimine geri taşımak | Split yoksa veya oran geçersizse `1` | Ticker izolasyonu, split günü hariç tutma, kümülatif çarpım ve geçersiz değer testleri |
-| `yf_nominal_open` | `Open × yf_future_split_factor` | `float64` | Nominal ölçeğe geri dönüştürülmüş | Dönemin İş Yatırım ham fiyat birimiyle karşılaştırılmak üzere yeniden ölçeklenen açılış | `T+1` değeri T kapanışında mevcut değildir; faktör feature değildir | D022 giriş fiyatı için kaynak ölçeği adayı; nihai kabul kararı verilmedi | Sağlayıcı açılışı eksikse eksik kalır | `HG_MIN <= yf_nominal_open <= HG_MAX`, normal/action günü ayrımı ve kalan aralık farkı |
-| `yf_nominal_high` | `High × yf_future_split_factor` | `float64` | Nominal ölçeğe geri dönüştürülmüş | Dönemin nominal birimine taşınan yFinance en yüksek fiyatı | İlgili gün sonrasında kalite testi için hesaplanır; feature değildir | İş Yatırım `HG_MAX` çapraz kontrolü | Sağlayıcı yüksek eksikse eksik kalır | İş Yatırım mutlak/yüzdesel farkı |
-| `yf_nominal_low` | `Low × yf_future_split_factor` | `float64` | Nominal ölçeğe geri dönüştürülmüş | Dönemin nominal birimine taşınan yFinance en düşük fiyatı | İlgili gün sonrasında kalite testi için hesaplanır; feature değildir | İş Yatırım `HG_MIN` çapraz kontrolü | Sağlayıcı düşük eksikse eksik kalır | İş Yatırım mutlak/yüzdesel farkı |
-| `yf_nominal_close` | `Close × yf_future_split_factor` | `float64` | Nominal ölçeğe geri dönüştürülmüş | Dönemin nominal birimine taşınan yFinance kapanışı | İlgili gün sonrasında kalite testi için hesaplanır; feature değildir | İş Yatırım `HG_KAPANIS` çapraz kontrolü | Sağlayıcı kapanışı eksikse eksik kalır | İş Yatırım mutlak/yüzdesel farkı |
+| Alan adı | Kaynak | Ham/türetilmiş | Formül veya kaynak eşleme | Veri tipi | Kullanım amacı | Tahmin anında kullanılabilirlik | Label/backtest kullanımı | Eksik değer davranışı | Veri kalite kontrolü |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `yf_provider_open` | yFinance `Open` | Ham sağlayıcı | Değiştirilmeden kopyalanır | `float64` | Nominal open girdisi ve ham veri denetimi | Günün açılışından sonra; `T+1` değeri T kapanışında bilinmez | Doğrudan kullanılmaz | Eksik/pozitif değilse nominal open eksik ve `NO_OPEN` | Kaynak tarihi, pozitiflik, provider OHLC sınırı |
+| `yf_provider_high` | yFinance `High` | Ham sağlayıcı | Değiştirilmeden kopyalanır | `float64` | Nominal high girdisi | Gün kapanışından sonra | Doğrudan kullanılmaz | Eksikse nominal high eksik kalır | Provider OHLC sınırı ve kaynak tarihi |
+| `yf_provider_low` | yFinance `Low` | Ham sağlayıcı | Değiştirilmeden kopyalanır | `float64` | Nominal low girdisi | Gün kapanışından sonra | Doğrudan kullanılmaz | Eksikse nominal low eksik kalır | Provider OHLC sınırı ve kaynak tarihi |
+| `yf_provider_close` | yFinance `Close` | Ham sağlayıcı | Değiştirilmeden kopyalanır | `float64` | Nominal close girdisi | Gün kapanışından sonra | Doğrudan kullanılmaz | Eksikse nominal close eksik kalır | Provider OHLC sınırı ve kaynak tarihi |
+| `yf_provider_adjusted_close` | yFinance `Adj Close` | Sağlayıcı düzeltilmiş | Değiştirilmeden kopyalanır | `float64` | Sağlayıcı denetimi; ana fiyat değildir | Tarihsel sorguda görülür, point-in-time güvenli feature değildir | Kullanılmaz | Eksik olarak korunur | `Close` oranı ve action tarihleriyle tutarlılık |
+| `yf_share_volume` | yFinance `Volume` | Ham adet hacmi | Değiştirilmeden kopyalanır | `float64`/`int64` | D022 işlem ve hacim kalite kontrolü | Gün kapanışından sonra | Giriş yapılabilirlik kontrolü; feature kararı değildir | `is_tl_volume` ile birlikte değerlendirilir | Negatiflik, sıfır/eksik, kaynaklar arası hacim bayrağı |
+| `yf_dividends` | yFinance `Dividends` | Ham action | Değiştirilmeden kopyalanır | `float64` | D023 kurumsal işlem sinyali | Tarihsel sorguda görülür; feature değildir | `T+1–T+3` penceresinde `CORPORATE_ACTION_WINDOW` ile `NA` | Kaynak satırı yoksa olay durumu bilinmiyor | Sıfır dışı olay ve İş Yatırım faktör değişimi karşılaştırması |
+| `yf_stock_splits` | yFinance `Stock Splits` | Ham action | Değiştirilmeden kopyalanır | `float64` | Split normalizasyonu ve D023 sinyali | Gelecek olay bilgisi tahmin sinyali değildir | Fiyat birimi dönüşümü; olay penceresi `NA` | Eksik/0 olay yok, geçersiz pozitif olmayan oran nötrlenir | Oran pozitifliği, ticker/tarih ve faktör testi |
+| `yf_future_split_factor` | `yf_stock_splits` | Türetilmiş normalizasyon | `t` tarihinden kesinlikle sonraki geçerli split oranlarının kümülatif çarpımı | `float64` | Tarihsel fiyat birimini döneminin nominal ölçeğine geri kurmak | Gelecek olay içerdiği için feature değildir ve LightGBM'e verilmez | Yalnız OHLC normalizasyonu | Geçerli gelecek split yoksa `1`; üretilemezse açık kalite hatası | Split günü hariç, ticker izolasyonu, sonlu/pozitif değer, aynı OHLC faktörü |
+| `yf_nominal_open` | yFinance + split faktörü | Türetilmiş fiyat | `yf_provider_open × yf_future_split_factor` | `float64` | Tek giriş ve tavan-açılış fiyatı | `T+1` değeri T kapanışında bilinmez; faktör sinyal değildir | `T+1` giriş fiyatı ve tavan açılış kontrolü | Eksik/geçersizse `NO_OPEN`, label/backtest `NA` | `low <= open <= high`, dönüşüm eşitliği, çapraz kalite uyarısı |
+| `yf_nominal_high` | yFinance + split faktörü | Türetilmiş fiyat | `yf_provider_high × yf_future_split_factor` | `float64` | Tek günlük high fiyatı | İlgili gün kapanışından sonra | `T+1–T+3` maksimum high ile `%5` hedef kontrolü | Eksik/geçersizse `INVALID_OHLC`, `NA` | `low <= high`, dönüşüm eşitliği, çapraz kalite uyarısı |
+| `yf_nominal_low` | yFinance + split faktörü | Türetilmiş fiyat | `yf_provider_low × yf_future_split_factor` | `float64` | Tek günlük low fiyatı | İlgili gün kapanışından sonra | OHLC geçerlilik kontrolü | Eksik/geçersizse `INVALID_OHLC`, `NA` | `low <= open/close <= high`, dönüşüm eşitliği |
+| `yf_nominal_close` | yFinance + split faktörü | Türetilmiş fiyat | `yf_provider_close × yf_future_split_factor` | `float64` | Tek kapanış ve tavan baz fiyatı | Gün kapanışından sonra | `T+3` çıkışı ve önceki geçerli kapanıştan tavan hesabı | Eksik/geçersizse `INVALID_OHLC` veya `NO_PREVIOUS_CLOSE`, `NA` | `low <= close <= high`, dönüşüm eşitliği, çapraz kalite uyarısı |
+| `is_tl_volume` | İş Yatırım `HGDG_HACIM` | Ham/sağlayıcı hacmi | Kaynak değeri | `float64` | D022 TL işlem hacmi ve kalite kontrolü | Gün kapanışından sonra | `yf_share_volume` ile işlem gerçekleşme kontrolü | İki hacim eksikse açık soru; ikisi sıfırsa `NO_TRADE` | Negatiflik, sıfır/eksik ve `SOURCE_VOLUME_CONFLICT` |
+| `cross_source_price_warning` | yFinance nominal + İş Yatırım `HG_*` | Türetilmiş kalite bayrağı | Karşılaştırılabilir nominal/İş Yatırım high-low-close alanlarından en az biri yalnız sayısal toleransı aşarsa `true` | `boolean` | Fiyat kaynakları çapraz veri kalite raporu | İlgili gün sonrasında; model feature'ı değildir | Satırı otomatik dışlamaz, kabul sonucunu etkilemez | Karşılaştırma yapılamıyorsa `NA` | Fark alanları ve sayısal tolerans raporlanır; sabit yüzde kabul eşiği yoktur |
 
 ## Kabul Testinde Üretilen Türetilmiş Alanlar
 
@@ -86,14 +74,21 @@ Aşağıdaki alanlar kaynak sütunu değil, kabul testi kalite çıktılarıdır
 is_isyatirim_date
 has_yfinance_row
 has_open
+missing_nominal_open
+missing_nominal_high
+missing_nominal_low
+missing_nominal_close
+missing_nominal_high_low_close
 has_isyatirim_tl_volume
 has_yfinance_share_volume
 both_volumes_zero
 both_volumes_missing
 one_volume_missing
 one_volume_zero_other_positive
-valid_ohlc
-source_price_conflict
+valid_nominal_ohlc
+split_factor_unavailable
+nominal_conversion_consistent
+cross_source_price_warning
 adjustment_factor
 adjustment_factor_changed
 yf_future_split_factor
@@ -109,6 +104,12 @@ has_yfinance_dividend
 has_yfinance_split
 has_yfinance_other_action
 has_any_corporate_action_signal
+corporate_action_window
+entry_eligible
+entry_exclusion_reason
+volume_quality_flag
+label_eligible
+label_exclusion_reason
 ```
 
 `adjustment_factor = HGDG_KAPANIS / HG_KAPANIS` olarak hesaplanır. Değişim kontrolünde yalnız kayan nokta ve kaynak yuvarlama gürültüsünü bastırmak için `rtol=0.0001`, `atol=0.00005` kullanılır. Kesin fiyat uyuşmazlığı eşiği veya BİST fiyat adımı toleransı bu görevde belirlenmemiştir.

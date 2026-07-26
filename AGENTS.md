@@ -67,6 +67,11 @@ Codex bir devir talimatı aldığında:
 - Veri toplama, temizleme, label üretme, feature üretme, model eğitme, tahmin ve backtest ayrı sorumluluklarda tutulmalıdır.
 - Ayarlar merkezi config yapısında tutulmalıdır.
 - Random seed, veri dönemi ve model parametreleri kaydedilmelidir.
+- Fiyat bağımlı giriş, label, çıkış, OHLC geçerlilik ve tavan hesaplarında yalnız yFinance nominal OHLC alanları kullanılmalıdır.
+- İş Yatırım ve yFinance fiyatları aynı işlem hesabında karıştırılmamalı; İş Yatırım fiyatları yalnız veri kalite çapraz kontrolünde kullanılmalıdır.
+- yFinance sağlayıcı OHLC değerleri `yf_provider_*`, nominal karşılıkları `yf_nominal_*` alanlarında ayrı ve değişmeden saklanmalıdır.
+- `yf_future_split_factor` ve gelecekteki action bilgileri model feature'ı veya tahmin sinyali yapılmamalıdır.
+- Ham yFinance yanıtları ve normalizasyonda kullanılan split kayıtları veri sürümüyle saklanmalı; yeni indirmeler eski sürümlerin üzerine yazılmamalıdır.
 - Kullanıcının paylaşmadığı dosya içeriği varsayılmamalıdır.
 - İlgisiz dosyalar değiştirilmemelidir.
 - Büyük mimari değişiklikler gerekçesiz yapılmamalıdır.

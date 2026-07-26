@@ -4,9 +4,11 @@
 
 ## Mevcut Aşama
 
-Veri kaynakları, `2020-03-13` tarihsel başlangıcı, standart tavan açılış hesabı, temel `T+1` işlem yapılabilirlik kuralları ve özel işlem durumlarının ilk sürüm yaklaşımı kesinleştirildi. Yerel kaynak kabul testi ve yFinance tarihsel fiyat ölçeği deneyi teknik olarak tamamlandı; kaynak kabul sonucu `PARTIAL` olarak ölçüldü. İki kaynağın gerçek sütunları ve nominal ölçek alanları `DATA_DICTIONARY.md` içinde belgelendi.
+Kaynak kabul testinde tespit edilen hibrit fiyat ölçeği sorunu için tek fiyat kaynağı yaklaşımı kesinleştirildi.
 
-Genel veri toplama ve temizleme aşaması başlatılmadı. Sıradaki görev, split normalizasyonu sonrası kalan normal-gün uyuşmazlıklarını değerlendirip fiyat ölçeği kabul ölçütünü kesinleştirmektir.
+İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. Tek kaynaklı kabul kodu ve birim testleri tamamlandı.
+
+`2026-07-26` gerçek veri kabul koşusu, İş Yatırım yıllık isteklerindeki yaygın okuma zaman aşımları nedeniyle `FAIL` üretti; bu sonuç yFinance nominal OHLC iç tutarlılığına ilişkin bir başarısızlık değildir. Sağlayıcı koşusu eksiksiz tamamlanmadan kaynak kabulü verilmedi. Sıradaki görev İş Yatırım erişimi kararlı olduğunda kabul testini yeniden çalıştırmak ve ardından veri toplama/temizleme altyapısına geçmektir.
 
 ## Tamamlananlar
 
@@ -33,11 +35,11 @@ Genel veri toplama ve temizleme aşaması başlatılmadı. Sıradaki görev, spl
 - Codex çalışma kurallarını repo düzeyinde tanımlayan `AGENTS.md` dosyası hazırlandı.
 - Dört güncel yönetim dosyası (`PROJECT_BRIEF.md`, `PROJECT_STATUS.md`, `DECISIONS.md`, `AGENTS.md`) GitHub reposuna yüklendi.
 - THYAO için aynı tarih aralığındaki İş Yatırım ve yFinance verileri karşılaştırıldı.
-- İş Yatırım ana, yFinance tamamlayıcı kaynak olarak seçildi.
+- D017'deki İş Yatırım ana/yFinance tamamlayıcı hibrit fiyat yaklaşımı D024 ile revize edildi.
 - Ana işlem takviminin İş Yatırım verisinden oluşturulmasına karar verildi.
-- Açılış ve adet hacminin yFinance’den alınmasına karar verildi.
+- Bütün open, high, low ve close fiyatlarının yFinance nominal serisinden alınmasına karar verildi.
 - Kaynak uyuşmazlıklarının veri kalite kontrolüyle yönetilmesine karar verildi.
-- Yalnızca yFinance veya yalnızca İş Yatırım kullanılmamasına karar verildi.
+- İş Yatırım ve yFinance fiyatlarının aynı giriş, label, çıkış veya tavan hesabında karıştırılmamasına karar verildi.
 - Sonradan halka arz edilen hisselerin kendi ilk işlem tarihlerinden başlayacağı kararlaştırıldı.
 - Eksik geçmişin geriye doğru doldurulmamasına karar verildi.
 - Veri toplama başlangıcı ile walk-forward test başlangıcının ayrı tutulmasına karar verildi.
@@ -55,7 +57,7 @@ Genel veri toplama ve temizleme aşaması başlatılmadı. Sıradaki görev, spl
 - Tavan açılışın sabit `%9,90` eşiğiyle değil, `%10` ham limitin fiyat adımına aşağı yuvarlanmasıyla tespit edilmesine karar verildi.
 - Tavan açılan kayıtların işlem ve label evreninden `NA` olarak çıkarılacağı kesinleştirildi.
 - İlk işlem günü, serbest marj ve kurumsal işlem gibi standart hesaplamaya uygun olmayan durumların özel incelemeye alınacağı belirlendi.
-- `T+1` ham açılış fiyatı bulunmayan kayıtların negatif label yerine `NA` bırakılmasına karar verildi.
+- `T+1` yFinance nominal açılış fiyatı bulunmayan kayıtların negatif label yerine `NA` bırakılmasına karar verildi.
 - İş Yatırım TL hacmi ile yFinance adet hacminin birlikte sıfır olduğu günlerin işlem gerçekleşmemiş kabul edilmesine karar verildi.
 - Hacim alanlarından en az biri pozitifse kaydın yalnızca hacim nedeniyle elenmemesine karar verildi.
 - Hacimlerden biri pozitifken diğerinin sıfır veya eksik olmasının yalnızca veri kalite uyarısı oluşturmasına karar verildi.
@@ -65,7 +67,7 @@ Genel veri toplama ve temizleme aşaması başlatılmadı. Sıradaki görev, spl
 - İlk sürümde kurumsal işlem ve serbest marj kontrollerinde KAP kullanılmamasına karar verildi.
 - Kurumsal işlem tespitinde yFinance action kayıtları ile İş Yatırım ham/düzeltilmiş fiyat oranı değişimlerinin kullanılmasına karar verildi.
 - `T+1–T+3` penceresinde kurumsal işlem bulunan kayıtların `NA` bırakılması kesinleştirildi.
-- Önceki geçerli ham kapanışı bulunmayan kayıtların standart tavan hesabına alınmamasına karar verildi.
+- Önceki geçerli yFinance nominal kapanışı bulunmayan kayıtların standart tavan hesabına alınmamasına karar verildi.
 - Açılış veya gün içi en yüksek fiyat hesaplanan üst fiyat limitini aşıyorsa kaydın standart dışı işlem durumu olarak `NA` bırakılması kararlaştırıldı.
 - İlk sürümde kapsamlı tarihsel serbest marj listesi oluşturulmamasına karar verildi.
 - Yerel kaynak kabul testi 10 hissede ve dört test döneminde gerçek İş Yatırım/yFinance verisiyle teknik olarak tamamlandı; nihai kabul durumu `PARTIAL` olarak güncellendi.
@@ -87,6 +89,16 @@ Genel veri toplama ve temizleme aşaması başlatılmadı. Sıradaki görev, spl
 - Beş hisselik tam dönemde temettü günleri, split günleri ve düzeltme katsayısı değişim günleri dönüşüm sonrasında `%100` aralık geçerliliği verdi; D023 uyarınca bu günler yine normal gün kabulüne dahil edilmedi.
 - Kalan normal-gün uyuşmazlıklarında hem belirgin çok-kaynaklı tarih/fiyat farkları hem de sayısal/fiyat adımı ölçeğinde küçük sınır aşmaları gözlendi; bu görevde sabit kabul eşiği belirlenmedi.
 - Kaynak kabulü, eksiksiz teknik koşuya rağmen split yaşamış hisselerin normal günlerinde 188 tutarsızlık ve kesinleşmemiş kabul toleransı bulunduğu için `PARTIAL` olarak sınıflandırıldı.
+- Hibrit yFinance open + İş Yatırım OHLC yaklaşımından vazgeçildi.
+- Tüm fiyat alanlarında yFinance nominal OHLC kullanılmasına karar verildi.
+- yFinance sağlayıcı ve nominal fiyatlarının ayrı saklanması kesinleştirildi.
+- `yf_nominal_price[t] = yf_provider_price[t] × t tarihinden sonraki geçerli split oranlarının kümülatif çarpımı` formülü kesinleştirildi; split gününün kendi oranı aynı güne uygulanmayacak.
+- Tavan hesabında önceki geçerli yFinance nominal close kullanılmasına karar verildi.
+- İş Yatırım fiyat uyuşmazlığının satırı dışlamayan `cross_source_price_warning` kalite uyarısı olarak tutulmasına karar verildi.
+- Kaynak kabul testi yFinance nominal OHLC iç tutarlılığını ana kriter, İş Yatırım fiyat farkını yalnız kalite uyarısı olarak kullanacak şekilde düzenlendi.
+- `NO_OPEN`, `NO_TRADE`, `INVALID_OHLC`, `SOURCE_VOLUME_CONFLICT` ve `CORPORATE_ACTION_WINDOW` durumları kabul testinde üretilebilir hale getirildi.
+- Provider alanlarının korunması, nominal OHLC iç geçerliliği, çapraz kaynak uyarısının satırı dışlamaması ve split faktörünün feature listesinde olmaması dahil 17 birim test tamamlandı.
+- Gerçek veri kabul koşusu iki kez ağ erişimiyle denendi; İş Yatırım okuma zaman aşımları nedeniyle eksiksiz kaynak koşulu sağlanamadı ve raporlar `FAIL` olarak yeniden üretildi. Sahte veya önbelleğe alınmış veriyle başarı üretilmedi.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -128,11 +140,12 @@ Genel veri toplama ve temizleme aşaması başlatılmadı. Sıradaki görev, spl
 
 ## Sıradaki Görevler
 
-1. Dönüşüm sonrası hisse/dönem/gün grubu oranlarını ve en büyük kalan uyuşmazlıkları değerlendirerek fiyat ölçeği kabul ölçütünü kesinleştir.
-2. `yf_future_split_factor` yaklaşımının veri sürümleme şartıyla kalıcı normalizasyon yöntemi olup olmayacağına karar ver.
-3. Kaynak kabul sonucu `PASS` olmadan genel veri toplama, label veya backtest altyapısına geçme.
-4. Kabul kararı sonrasında D022 veri kalite bayraklarını ve D023 kurumsal işlem sinyallerini modüler testlerle uygula.
-5. Kod değiştiren hisselerin eşleme yöntemini ayrı veri kabul örnekleriyle doğrula.
+1. İş Yatırım erişimi kararlı olduğunda tek kaynaklı yFinance nominal OHLC kabul testini yeniden çalıştır.
+2. Eksiksiz gerçek veri koşusunda yFinance nominal OHLC'nin kendi iç tutarlılığını doğrula.
+3. D022 ve D023 durum kodlarını modüler veri temizleme kodunda uygula.
+4. Veri toplama ve ham veri sürümleme altyapısını oluştur.
+5. Kod değiştiren hisselerin eşlemesini test et.
+6. Label üretim koduna geç.
 
 ## Sonraki Ana Aşamalar
 
@@ -150,9 +163,6 @@ Genel veri toplama ve temizleme aşaması başlatılmadı. Sıradaki görev, spl
 ## Açık Sorular
 
 - Açılış mevcutken iki hacim alanının da eksik olduğu kayıtlar nasıl ele alınacak?
-- Split normalizasyonu sonrası normal-gün geçerlilik oranı ve kalan aralık farkları için hangi kabul ölçütü uygulanacak?
-- `yf_future_split_factor` veri sürümleme şartıyla kalıcı fiyat birimi normalizasyonu olarak kabul edilecek mi?
-- İş Yatırım ve yFinance ham fiyat farkları için tarih/fiyat seviyesi etkili kabul toleransı nasıl belirlenecek?
 - İş Yatırım düzeltme katsayısı ile eşleşmeyen yFinance action kayıtları nasıl sınıflandırılacak?
 - Likidite filtresi nasıl belirlenecek?
 - Günlük kaç hisse seçilecek?
