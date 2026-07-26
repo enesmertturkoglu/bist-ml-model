@@ -1,0 +1,18 @@
+{
+  "input_clean_snapshot_id": "snap_80ea98811d6a6f3a_r0001_0141392192f1",
+  "label_snapshot_checksum": "fb399ce13977708be6d877ef2dbe6498146403730d93fa2c3ce18944ae91f781",
+  "label_snapshot_created": true,
+  "label_snapshot_id": "snap_f96b510dccc9ac70_r0001_bda32acb908b",
+  "summary": {
+    "label_na": 2,
+    "label_negative": 1,
+    "label_positive": 3,
+    "na_reasons": {
+      "INCOMPLETE_HORIZON": 2
+    },
+    "row_count": 6,
+    "target_hit_t1": 0,
+    "target_hit_t2": 0,
+    "target_hit_t3": 3
+  }
+}
