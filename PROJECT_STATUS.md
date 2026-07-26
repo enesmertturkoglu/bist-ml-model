@@ -131,7 +131,7 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu altyapısı ile 
 - D026 ile `2020-03-13`–`2023-11-05` dört kademeli ve `2023-11-06` sonrası sekiz kademeli `EQUITY` rejimleri eklendi. İlk tarih resmî başlangıç iddiası değil, projenin model dönemi kapsam sınırıdır. Bantlar alt dahil/üst hariçtir; eksik, çakışan veya boşluklu referans veri yüklenmez.
 - Tavan hesabı `previous_valid_yf_nominal_close × Decimal("1.10")`, `entry_date + EQUITY + raw_upper_limit` kural çözümü ve `Decimal` ile içeri/aşağı yuvarlama sırasına bağlandı. Çözülen kural kimliği, tarih aralığı, fiyat adımı, çözüm durumu ve resmî belge temiz snapshot'ta saklanır; kural yoksa mevcut açık inceleme davranışı korunur.
 - Fiyat adımı sınırları, rejim geçişleri, boşluk/çakışma, bilinmeyen tarih/enstrüman, `Decimal` deterministikliği ve temizleme entegrasyonuyla birlikte toplam 153 birim test geçti. Yeniden çalıştırılan 10 hisselik gerçek kaynak kabulü `PASS` verdi.
-- THYAO `2024-01-02`–`2024-01-12` üç kaynak snapshot setinin D026 tarifesiyle gerçek temizleme tekrar koşusu, kod commit'inden sonra üretilecek ve aşağıdaki raporlara kaydedilecektir.
+- THYAO `2024-01-02`–`2024-01-12` üç kaynak snapshot seti D026 tarifesi ve `1c5c7a7` kod commit'iyle yeniden temizlendi. Yeni `COMPLETE` snapshot `snap_80ea98811d6a6f3a_r0001_0141392192f1` oldu: 6/6 fiyat adımı `BIST_EQUITY_FROM_20231106_V1` ile çözüldü, `PRICE_STEP_UNAVAILABLE=0`, `requires_review=0`, `entry_eligible=true` 6, diğer dışlama kodları 0 ve satırı dışlamayan çapraz kaynak uyarısı 6 ölçüldü. İçerik checksum'u `7350ad8a5c39f32942f616c4ea8ffd2193691e70982c099d604d6c8e7096d030` olarak kaydedildi.
 
 ## Kesinleşen Başlangıç Senaryosu
 
