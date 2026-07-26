@@ -481,6 +481,8 @@ Veri temizleme, işlem yapılabilirlik, label üretimi, backtest, veri kalite ra
 **Tarih:**
 2026-07-26
 
+**Revizyon notu:** D022'de geçen yFinance ham açılış fiyatı referansları D024 sonrasında `yf_nominal_open` olarak uygulanır. Hacim ve işlem yapılabilirlik kuralları değişmemiştir.
+
 ### D023 — Özel İşlem Durumlarının KAP Olmadan Ele Alınması
 
 **Karar:**  
@@ -523,6 +525,8 @@ Veri temizleme, kurumsal işlem tespiti, tavan hesabı, label üretimi, backtest
 
 **Tarih:**  
 2026-07-26
+
+**Revizyon notu:** D023'te fiyat hesapları için geçen önceki İş Yatırım ham kapanışı, ham açılış ve ham en yüksek fiyat referansları D024 sonrasında sırasıyla `yf_nominal_close`, `yf_nominal_open` ve `yf_nominal_high` olarak uygulanır. İş Yatırım ham/düzeltilmiş fiyatları yalnız kurumsal işlem sinyali, çapraz kaynak kalite kontrolü ve denetim amacıyla kullanılır.
 
 ### D024 — Tek Fiyat Kaynağı ve yFinance Nominal Fiyat Normalizasyonu
 

@@ -79,9 +79,9 @@ Temel metrikler:
 
 Ana model dönemi `2020-03-13` tarihinde başlar. Standart normal adi paylarda tavan açılış `%10` marj ve içeri doğru fiyat adımı yuvarlamasıyla hesaplanır; baz fiyat ve açılış karşılaştırması yFinance nominal OHLC serisinden alınır.
 
-Hibrit fiyat hesabından vazgeçilmiş, bütün fiyat alanları için yFinance nominal OHLC tek kaynak olarak kesinleştirilmiştir. Sıradaki aşama bu yapının yerel kabul testi ve ardından veri toplama/temizleme altyapısıdır.
+Hibrit fiyat hesabından vazgeçilmiş, bütün fiyat alanları için yFinance nominal OHLC tek kaynak olarak kesinleştirilmiş ve dayanıklı kaynak kabul koşusu `PASS` ile tamamlanmıştır. Sıradaki aşama veri toplama ve temizleme altyapısıdır.
 
-Gerçek veri sütunları tam olarak belgelenmediği için feature listesi henüz kesin değildir.
+Gerçek kaynak sütunları ve fiyat normalizasyon alanları `DATA_DICTIONARY.md` içinde belgelenmiştir. Feature engineering aşaması henüz başlamadığı için model feature listesi henüz kesin değildir.
 
 ## Sohbetler Arası Devir Standardı
 

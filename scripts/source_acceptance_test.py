@@ -25,7 +25,16 @@ from typing import Callable, Iterable
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from isyatirimhisse import fetch_stock_data
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.data.isyatirim_client import (  # noqa: E402
+    ClientStats,
+    IsYatirimClient,
+    IsYatirimFetchError,
+)
 
 
 DEFAULT_TICKERS = (
@@ -973,33 +982,12 @@ def _fetch_with_retry(function: Callable[[], pd.DataFrame], source: str, ticker:
     ) from last_error
 
 
-def fetch_isyatirim_in_chunks(ticker: str, start: date, end: date) -> pd.DataFrame:
-    """Fetch at most one calendar year per request to reduce provider timeouts."""
-    chunks: list[pd.DataFrame] = []
-    chunk_start = start
-    while chunk_start <= end:
-        chunk_end = min(date(chunk_start.year, 12, 31), end)
-        label = f"{ticker} {chunk_start.isoformat()}..{chunk_end.isoformat()}"
-        chunk = _fetch_with_retry(
-            lambda start_value=chunk_start, end_value=chunk_end: fetch_stock_data(
-                ticker,
-                start_value.strftime("%d-%m-%Y"),
-                end_value.strftime("%d-%m-%Y"),
-            ),
-            "İş Yatırım",
-            label,
-        )
-        chunks.append(chunk)
-        chunk_start = chunk_end + timedelta(days=1)
-    if not chunks:
-        return pd.DataFrame()
-    return pd.concat(chunks, ignore_index=True).drop_duplicates(
-        ["HGDG_HS_KODU", "HGDG_TARIH"], keep="last"
-    )
-
-
 def fetch_sources(
-    tickers: Iterable[str], start: date, end: date
+    tickers: Iterable[str],
+    start: date,
+    end: date,
+    *,
+    isyatirim_client: IsYatirimClient,
 ) -> tuple[pd.DataFrame, pd.DataFrame, list[str], list[str], list[str]]:
     is_frames: list[pd.DataFrame] = []
     yf_frames: list[pd.DataFrame] = []
@@ -1010,11 +998,23 @@ def fetch_sources(
     for ticker in tickers:
         print(f"Fetching {ticker}: İş Yatırım", flush=True)
         try:
-            raw_is = fetch_isyatirim_in_chunks(ticker, start, end)
+            raw_is = isyatirim_client.fetch_history(ticker, start, end)
             is_columns.update(map(str, raw_is.columns))
             is_frames.append(normalize_isyatirim_history(raw_is, ticker))
+        except IsYatirimFetchError as error:
+            errors.extend(
+                f"İş Yatırım: {failure.format()}" for failure in error.failures
+            )
+            if not error.partial_data.empty:
+                is_columns.update(map(str, error.partial_data.columns))
+                is_frames.append(
+                    normalize_isyatirim_history(error.partial_data, ticker)
+                )
         except Exception as error:
-            errors.append(str(error))
+            errors.append(
+                f"İş Yatırım: ticker={ticker}; error_type={type(error).__name__}; "
+                f"error={error}"
+            )
 
         print(f"Fetching {ticker}: yFinance", flush=True)
         try:
@@ -1118,6 +1118,7 @@ def write_summary(
     is_columns: list[str],
     yf_columns: list[str],
     errors: list[str],
+    isyatirim_stats: ClientStats,
     acceptance_status: str,
     acceptance_reason: str,
 ) -> None:
@@ -1161,7 +1162,19 @@ def write_summary(
     issue_lines = (
         "\n".join(f"- {error}" for error in errors)
         if errors
-        else f"- {acceptance_reason}"
+        else (
+            "_Sağlayıcı hatası veya tamamlanmamış ana kontrol bulunmuyor._"
+            if acceptance_status == "PASS"
+            else f"- {acceptance_reason}"
+        )
+    )
+    cache_issue_lines = (
+        "\n".join(
+            f"- `{issue.path}` — {issue.error_type}: {issue.message}"
+            for issue in isyatirim_stats.cache_issues
+        )
+        if isyatirim_stats.cache_issues
+        else "_Bozuk veya okunamayan cache kaydı gözlenmedi._"
     )
     metric_columns = [
         "period",
@@ -1196,8 +1209,9 @@ def write_summary(
     ]
 
     next_task = (
-        "D022 ve D023 durum kodlarını modüler veri temizleme koduna taşımak; "
-        "ardından değişmez ham yFinance yanıtı/split sürümleme altyapısını kurmak."
+        "Veri toplama, değişmez ham veri sürümleme ve sağlayıcı revizyon tespiti "
+        "altyapısını kurmak; ardından D022 ve D023 durum kodlarını modüler veri "
+        "temizleme akışına taşımak."
         if acceptance_status == "PASS"
         else "Sağlayıcı erişimi kararlı olduğunda eksiksiz gerçek veri kabul "
         "koşusunu yeniden çalıştırmak; kabul verilmeden genel veri/label akışına geçmemek."
@@ -1252,6 +1266,31 @@ Ana BİST işlem takvimi İş Yatırım'dan kuruldu. yFinance `end` sınırını
 
 Bu kabul çalıştırıcısı ham yanıtları repoya yazmaz. D024'ün gerektirdiği değişmez ham yanıt/split sürümleme ve yeniden indirme farkı tespiti, veri toplama altyapısında uygulanması gereken açık tekrarlanabilirlik işidir.
 
+## Dayanıklı İş Yatırım istemcisi
+
+- Read timeout: **{isyatirim_stats.configured_timeout_seconds:g} saniye** (`connect=10` saniye)
+- Yapılandırılan maksimum deneme sayısı: **{isyatirim_stats.configured_max_retries}**
+- Gerçek retry sayısı: **{isyatirim_stats.retry_count}**
+- Minimum parça: **{isyatirim_stats.configured_minimum_chunk_months} ay**
+- İstekler arası temel gecikme: **{isyatirim_stats.configured_request_delay_seconds:g} saniye + jitter**
+- Yıllık çağrı sayısı: **{isyatirim_stats.yearly_requests}**
+- Altı aylık çağrı sayısı: **{isyatirim_stats.six_month_requests}**
+- Üç aylık çağrı sayısı: **{isyatirim_stats.three_month_requests}**
+- Altı aylığa bölünen parça sayısı: **{isyatirim_stats.split_to_six_month_count}**
+- Üç aylığa bölünen parça sayısı: **{isyatirim_stats.split_to_three_month_count}**
+- Cache hit sayısı: **{isyatirim_stats.cache_hits}**
+- Gerçek ağ isteği sayısı: **{isyatirim_stats.network_requests}**
+- Timeout sayısı: **{isyatirim_stats.timeout_count}**
+- Timeout sonrasında başarıya ulaşan parça sayısı: **{isyatirim_stats.timeout_recovered_chunks}**
+- Tamamen başarısız kalan minimum parça sayısı: **{isyatirim_stats.failed_chunks}**
+- Bozuk/okunamayan cache kaydı sayısı: **{isyatirim_stats.cache_corruption_count}**
+
+İstekler paralel gönderilmedi. Operasyonel cache yalnız kabul koşusuna devam etmek içindir; D024'ün kalıcı ve sürümlenmiş ham veri arşivi değildir.
+
+### Cache okuma sorunları
+
+{cache_issue_lines}
+
 ## Nominal OHLC iç tutarlılığı ve eksikler
 
 Ana kontrol yalnız tek kaynaklı nominal alanlarla yapılır:
@@ -1294,6 +1333,7 @@ Ayrıntılı karşılaştırmalar `source_scale_normalization.csv` dosyasındad�
 - Aynı split faktörü open, high, low ve close'a birlikte uygulanır; dönüşüm oran ilişkilerini değiştirmez.
 - `T+1–T+3` kurumsal işlem penceresi yalnız label/backtest uygunluğunda `NA` üretir, tahmin feature'ı değildir.
 - İş Yatırım düzeltilmiş/ham faktörü ve çapraz fiyat farkı yalnız kalite alanıdır.
+- İş Yatırım cache'i yalnız veri erişimini hızlandırır; tahmin bilgisi üretmez. Cache ve doğrudan sağlayıcı verisi aynı normalizasyon yolundan geçer.
 - Bu görev model feature'ı, label veya backtest sonucu üretmez.
 
 ## Tekrarlanabilirlik ve bilinen sınırlamalar
@@ -1333,6 +1373,39 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("reports/source_acceptance"),
     )
+    parser.add_argument(
+        "--isyatirim-timeout-seconds",
+        type=float,
+        default=60.0,
+        help="İş Yatırım read timeout in seconds; connect timeout remains 10.",
+    )
+    parser.add_argument(
+        "--isyatirim-max-retries",
+        type=int,
+        default=5,
+        help="Maximum attempts per İş Yatırım date chunk.",
+    )
+    parser.add_argument(
+        "--isyatirim-minimum-chunk-months",
+        type=int,
+        choices=(3, 6, 12),
+        default=3,
+    )
+    parser.add_argument(
+        "--isyatirim-request-delay-seconds",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--isyatirim-cache-dir",
+        type=Path,
+        default=Path(".cache/source_acceptance/isyatirim"),
+    )
+    parser.add_argument(
+        "--refresh-isyatirim-cache",
+        action="store_true",
+        help="Bypass existing operational İş Yatırım cache entries.",
+    )
     return parser.parse_args()
 
 
@@ -1342,8 +1415,19 @@ def main() -> int:
     # Fetch a few preceding sessions so a change on 2020-03-13 can be compared
     # with its prior factor; metrics still begin on the decided model date.
     fetch_start = date(2020, 3, 1)
+    isyatirim_client = IsYatirimClient(
+        timeout_seconds=args.isyatirim_timeout_seconds,
+        max_retries=args.isyatirim_max_retries,
+        minimum_chunk_months=args.isyatirim_minimum_chunk_months,
+        request_delay_seconds=args.isyatirim_request_delay_seconds,
+        cache_dir=args.isyatirim_cache_dir,
+        refresh_cache=args.refresh_isyatirim_cache,
+    )
     is_frame, yf_frame, is_columns, yf_columns, errors = fetch_sources(
-        DEFAULT_TICKERS, fetch_start, args.run_date
+        DEFAULT_TICKERS,
+        fetch_start,
+        args.run_date,
+        isyatirim_client=isyatirim_client,
     )
     if is_frame.empty:
         print("SOURCE_ACCEPTANCE_STATUS=FAIL", file=sys.stderr)
@@ -1386,6 +1470,7 @@ def main() -> int:
         is_columns=is_columns,
         yf_columns=yf_columns,
         errors=errors,
+        isyatirim_stats=isyatirim_client.stats,
         acceptance_status=acceptance_status,
         acceptance_reason=acceptance_reason,
     )

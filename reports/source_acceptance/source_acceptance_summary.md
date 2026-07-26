@@ -2,11 +2,11 @@
 
 **Çalıştırma tarihi:** 2026-07-26
 
-**Üretim zamanı:** 2026-07-26T03:09:35+03:00
+**Üretim zamanı:** 2026-07-26T14:45:37+03:00
 
-**Kaynak kabul sonucu:** `FAIL`
+**Kaynak kabul sonucu:** `PASS`
 
-**Sonuç gerekçesi:** Kaynak koşusu 5 sağlayıcı hatasıyla eksik kaldı; gerekli tüm hisse ve dönemler alınamadı.
+**Sonuç gerekçesi:** yFinance nominal OHLC üretimi ve iç tutarlılığı doğrulandı; 7 eksik ve 0 geçersiz satır açık durum kodlarıyla dışlanabilir. 14386 çapraz kaynak fiyat farkı yalnız kalite uyarısıdır ve kabul sonucunu etkilemez.
 
 ## Ana fiyat kaynağı
 
@@ -50,6 +50,31 @@ Ana BİST işlem takvimi İş Yatırım'dan kuruldu. yFinance `end` sınırını
 
 Bu kabul çalıştırıcısı ham yanıtları repoya yazmaz. D024'ün gerektirdiği değişmez ham yanıt/split sürümleme ve yeniden indirme farkı tespiti, veri toplama altyapısında uygulanması gereken açık tekrarlanabilirlik işidir.
 
+## Dayanıklı İş Yatırım istemcisi
+
+- Read timeout: **60 saniye** (`connect=10` saniye)
+- Yapılandırılan maksimum deneme sayısı: **5**
+- Gerçek retry sayısı: **0**
+- Minimum parça: **3 ay**
+- İstekler arası temel gecikme: **1 saniye + jitter**
+- Yıllık çağrı sayısı: **70**
+- Altı aylık çağrı sayısı: **0**
+- Üç aylık çağrı sayısı: **0**
+- Altı aylığa bölünen parça sayısı: **0**
+- Üç aylığa bölünen parça sayısı: **0**
+- Cache hit sayısı: **0**
+- Gerçek ağ isteği sayısı: **70**
+- Timeout sayısı: **0**
+- Timeout sonrasında başarıya ulaşan parça sayısı: **0**
+- Tamamen başarısız kalan minimum parça sayısı: **0**
+- Bozuk/okunamayan cache kaydı sayısı: **0**
+
+İstekler paralel gönderilmedi. Operasyonel cache yalnız kabul koşusuna devam etmek içindir; D024'ün kalıcı ve sürümlenmiş ham veri arşivi değildir.
+
+### Cache okuma sorunları
+
+_Bozuk veya okunamayan cache kaydı gözlenmedi._
+
 ## Nominal OHLC iç tutarlılığı ve eksikler
 
 Ana kontrol yalnız tek kaynaklı nominal alanlarla yapılır:
@@ -61,10 +86,10 @@ yf_nominal_low <= yf_nominal_close <= yf_nominal_high
 
 | period | expected_isyatirim_days | yfinance_matching_days | yfinance_date_match_rate | missing_nominal_open_count | missing_nominal_high_low_close_count | invalid_nominal_ohlc_count | nominal_ohlc_validity_rate | split_factor_unavailable_count | corporate_action_window_count | cross_source_price_warning_count | open_present_both_volumes_missing_count |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| start_boundary | 120 | 120 | 1 | 0 | 0 | 0 | 1 | 0 | 3 | 120 | 0 |
-| price_step_change | 110 | 110 | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 98 | 0 |
-| recent_90_calendar_days | 290 | 290 | 1 | 0 | 0 | 0 | 1 | 0 | 9 | 208 | 0 |
-| full_period | 4767 | 4765 | 0.99958 | 2 | 2 | 0 | 1 | 0 | 96 | 3998 | 0 |
+| start_boundary | 240 | 240 | 1 | 0 | 0 | 0 | 1 | 0 | 3 | 240 | 0 |
+| price_step_change | 220 | 220 | 1 | 0 | 0 | 0 | 1 | 0 | 2 | 207 | 0 |
+| recent_90_calendar_days | 580 | 580 | 1 | 0 | 0 | 0 | 1 | 0 | 12 | 385 | 0 |
+| full_period | 7945 | 7942 | 0.999622 | 3 | 3 | 0 | 1 | 0 | 114 | 6538 | 0 |
 
 Tekil eksik veya geçersiz satırlar `NO_OPEN`/`INVALID_OHLC` durumlarıyla `NA` bırakılabilir ve tek başına kabulü başarısız yapmaz. Hisse bazındaki ayrıntılar `source_acceptance_metrics.csv` dosyasındadır.
 
@@ -75,8 +100,8 @@ Açılış mevcutken iki hacmin de eksik olduğu benzersiz takvim kaydı: **0**.
 ## D022 ve D023 uygulanabilirliği
 
 - **D022: UYGULANABİLİR.** Giriş fiyatı `yf_nominal_open` üzerinden değerlendirilir. `NO_OPEN`, `NO_TRADE` ve `INVALID_OHLC` kodları üretilebilir.
-- **D023: UYGULANABİLİR (tespit sinyallerinin bilinen sınırlamalarıyla).** `T+1–T+3` içinde kurumsal işlem sinyali bulunan **126** tahmin satırı `CORPORATE_ACTION_WINDOW` ile `NA` yapılabilir.
-- Kapsama giren benzersiz action satırı: **33**; yFinance action günü: **41**; İş Yatırım düzeltme faktörü değişim günü: **41**.
+- **D023: UYGULANABİLİR (tespit sinyallerinin bilinen sınırlamalarıyla).** `T+1–T+3` içinde kurumsal işlem sinyali bulunan **213** tahmin satırı `CORPORATE_ACTION_WINDOW` ile `NA` yapılabilir.
+- Kapsama giren benzersiz action satırı: **40**; yFinance action günü: **70**; İş Yatırım düzeltme faktörü değişim günü: **70**.
 
 | ticker | date | yf_dividends | yf_stock_splits | yf_future_split_factor | corporate_action_source |
 | --- | --- | --- | --- | --- | --- |
@@ -97,7 +122,12 @@ Açılış mevcutken iki hacmin de eksik olduğu benzersiz takvim kaydı: **0**.
 | BIMAS | 2025-12-17 00:00:00 | 2.5 | 0 | 2 | both |
 | BIMAS | 2026-05-14 00:00:00 | 0 | 2 | 1 | both |
 | BIMAS | 2026-06-17 00:00:00 | 2 | 0 | 1 | both |
+| EREGL | 2026-06-03 00:00:00 | 0.55 | 0 | 1 | both |
 | KCHOL | 2020-04-06 00:00:00 | 0.2095 | 0 | 1 | both |
+| SASA | 2021-04-27 00:00:00 | 0 | 1.3494 | 37.2668 | both |
+| SASA | 2022-05-05 00:00:00 | 0 | 2 | 18.6334 | both |
+| SASA | 2023-05-23 00:00:00 | 0 | 2.32918 | 8 | both |
+| SASA | 2024-08-12 00:00:00 | 0 | 8 | 1 | both |
 | SISE | 2020-05-29 00:00:00 | 0.142222 | 0 | 1 | both |
 | SISE | 2021-05-31 00:00:00 | 0.163227 | 0 | 1 | both |
 | SISE | 2022-05-31 00:00:00 | 0.408068 | 0 | 1 | both |
@@ -105,11 +135,6 @@ Açılış mevcutken iki hacmin de eksik olduğu benzersiz takvim kaydı: **0**.
 | SISE | 2024-05-31 00:00:00 | 0.7182 | 0 | 1 | both |
 | SISE | 2025-05-30 00:00:00 | 0.652909 | 0 | 1 | both |
 | SISE | 2026-06-01 00:00:00 | 0.587618 | 0 | 1 | both |
-| TUPRS | 2023-03-10 00:00:00 | 6.48745 | 0 | 7 | both |
-| TUPRS | 2023-04-04 00:00:00 | 0 | 7 | 1 | both |
-| TUPRS | 2023-09-29 00:00:00 | 15.0509 | 0 | 1 | both |
-| TUPRS | 2024-04-03 00:00:00 | 10.3799 | 0 | 1 | both |
-| TUPRS | 2024-09-27 00:00:00 | 11.9369 | 0 | 1 | both |
 
 ## Çapraz kaynak fiyat kalite uyarıları
 
@@ -119,26 +144,26 @@ En büyük normal-gün nominal-open/İş Yatırım aralık farklarından örnekl
 
 | ticker | date | yf_nominal_open | is_raw_low | is_raw_high | nominal_open_range_gap | nominal_open_range_gap_pct |
 | --- | --- | --- | --- | --- | --- | --- |
+| THYAO | 2026-05-21 00:00:00 | 295 | 274 | 274 | 21 | 7.66423 |
 | BIMAS | 2026-05-21 00:00:00 | 392.75 | 376.5 | 376.5 | 16.25 | 4.31607 |
 | TUPRS | 2026-05-21 00:00:00 | 249.1 | 241.7 | 241.7 | 7.40001 | 3.06165 |
+| THYAO | 2026-04-22 00:00:00 | 329.5 | 323 | 324 | 5.5 | 1.70015 |
+| THYAO | 2026-03-23 00:00:00 | 281.25 | 285.75 | 295.5 | 4.5 | 1.52284 |
 | SISE | 2026-05-21 00:00:00 | 46.3 | 42.9 | 42.9 | 3.4 | 7.92541 |
 | SISE | 2026-03-23 00:00:00 | 43.7 | 46.74 | 48.68 | 3.04 | 6.24486 |
-| TUPRS | 2023-01-23 00:00:00 | 601 | 601 | 628 | 2.28882e-05 | 3.75524e-06 |
-| TUPRS | 2022-12-06 00:00:00 | 478.9 | 478.9 | 487.7 | 1.37329e-05 | 2.84679e-06 |
-| TUPRS | 2021-10-04 00:00:00 | 113.8 | 113.8 | 116.5 | 1.2207e-05 | 1.05233e-05 |
-| TUPRS | 2022-06-06 00:00:00 | 276 | 276 | 284.5 | 1.14441e-05 | 4.0654e-06 |
-| TUPRS | 2022-12-19 00:00:00 | 454.6 | 454.6 | 470.3 | 9.15527e-06 | 1.95208e-06 |
-| TUPRS | 2022-03-17 00:00:00 | 192.8 | 192.8 | 200.5 | 6.48499e-06 | 3.27029e-06 |
-| BIMAS | 2023-01-30 00:00:00 | 134.1 | 128.2 | 134.1 | 6.10352e-06 | 4.75722e-06 |
-| TUPRS | 2024-01-04 00:00:00 | 140.9 | 140.9 | 143.9 | 6.10352e-06 | 4.2474e-06 |
-| TUPRS | 2024-01-16 00:00:00 | 141.4 | 141.4 | 143.9 | 6.10352e-06 | 4.26223e-06 |
-| TUPRS | 2024-02-01 00:00:00 | 150.4 | 150.4 | 155.7 | 6.10352e-06 | 3.94539e-06 |
-| TUPRS | 2024-07-03 00:00:00 | 164.9 | 164.9 | 168.8 | 6.10352e-06 | 3.62657e-06 |
-| TUPRS | 2025-11-19 00:00:00 | 203.9 | 203.9 | 208.5 | 6.10352e-06 | 2.9557e-06 |
-| TUPRS | 2026-06-22 00:00:00 | 226.1 | 220.7 | 226.1 | 6.10352e-06 | 2.76553e-06 |
-| BIMAS | 2023-11-02 00:00:00 | 277.4 | 277.4 | 290.5 | 6.10352e-06 | 2.1083e-06 |
-| TUPRS | 2023-02-07 00:00:00 | 576.6 | 521.1 | 576.6 | 6.10352e-06 | 1.16769e-06 |
-| TUPRS | 2023-02-15 00:00:00 | 574.9 | 574.9 | 574.9 | 6.10352e-06 | 1.06167e-06 |
+| SASA | 2026-05-21 00:00:00 | 2.82 | 2.53 | 2.53 | 0.29 | 11.4624 |
+| SASA | 2024-04-09 00:00:00 | 40.38 | 40.42 | 41.88 | 0.0399989 | 0.0966158 |
+| SASA | 2020-03-31 00:00:00 | 8.24995 | 8.25 | 8.77 | 4.69737e-05 | 0.000535618 |
+| SASA | 2021-02-03 00:00:00 | 26 | 26 | 27.74 | 4.00417e-05 | 0.00014678 |
+| SASA | 2020-12-18 00:00:00 | 18.93 | 18.93 | 19.57 | 3.99198e-05 | 0.000206838 |
+| SASA | 2020-11-04 00:00:00 | 15.4 | 15.4 | 15.75 | 3.72283e-05 | 0.000238032 |
+| SASA | 2020-03-23 00:00:00 | 4.86996 | 4.87 | 5.17 | 3.61781e-05 | 0.00072793 |
+| SASA | 2021-11-29 00:00:00 | 39.82 | 39.82 | 43.36 | 3.57852e-05 | 8.32989e-05 |
+| SASA | 2022-03-18 00:00:00 | 53.15 | 53.15 | 54.75 | 3.4843e-05 | 6.39908e-05 |
+| SASA | 2020-12-22 00:00:00 | 18.94 | 18.94 | 19.46 | 3.316e-05 | 0.000172708 |
+| SASA | 2020-07-13 00:00:00 | 11.25 | 11.25 | 12.02 | 3.25144e-05 | 0.000273921 |
+| SASA | 2021-12-13 00:00:00 | 47.18 | 47.18 | 49.34 | 2.71997e-05 | 5.59895e-05 |
+| SASA | 2020-11-18 00:00:00 | 16.87 | 16.87 | 17.21 | 2.66738e-05 | 0.000155714 |
 
 Ayrıntılı karşılaştırmalar `source_scale_normalization.csv` dosyasındadır. Bunlar ana OHLC başarı metriği değildir.
 
@@ -149,6 +174,7 @@ Ayrıntılı karşılaştırmalar `source_scale_normalization.csv` dosyasındad�
 - Aynı split faktörü open, high, low ve close'a birlikte uygulanır; dönüşüm oran ilişkilerini değiştirmez.
 - `T+1–T+3` kurumsal işlem penceresi yalnız label/backtest uygunluğunda `NA` üretir, tahmin feature'ı değildir.
 - İş Yatırım düzeltilmiş/ham faktörü ve çapraz fiyat farkı yalnız kalite alanıdır.
+- İş Yatırım cache'i yalnız veri erişimini hızlandırır; tahmin bilgisi üretmez. Cache ve doğrudan sağlayıcı verisi aynı normalizasyon yolundan geçer.
 - Bu görev model feature'ı, label veya backtest sonucu üretmez.
 
 ## Tekrarlanabilirlik ve bilinen sınırlamalar
@@ -160,11 +186,7 @@ Ayrıntılı karşılaştırmalar `source_scale_normalization.csv` dosyasındad�
 
 ## Başarısız veya eksik kalan kontroller
 
-- İş Yatırım failed for THYAO 2022-01-01..2022-12-31 after 5 attempts: No data was fetched for any symbol. Please check the symbols and date ranges.
-- İş Yatırım failed for GARAN 2020-03-01..2020-12-31 after 5 attempts: No data was fetched for any symbol. Please check the symbols and date ranges.
-- İş Yatırım failed for ASELS 2021-01-01..2021-12-31 after 5 attempts: No data was fetched for any symbol. Please check the symbols and date ranges.
-- İş Yatırım failed for EREGL 2020-03-01..2020-12-31 after 5 attempts: No data was fetched for any symbol. Please check the symbols and date ranges.
-- İş Yatırım failed for SASA 2020-03-01..2020-12-31 after 5 attempts: No data was fetched for any symbol. Please check the symbols and date ranges.
+_Sağlayıcı hatası veya tamamlanmamış ana kontrol bulunmuyor._
 
 ## Açık sorular
 
@@ -174,4 +196,4 @@ Ayrıntılı karşılaştırmalar `source_scale_normalization.csv` dosyasındad�
 
 ## Önerilen sıradaki görev
 
-Sağlayıcı erişimi kararlı olduğunda eksiksiz gerçek veri kabul koşusunu yeniden çalıştırmak; kabul verilmeden genel veri/label akışına geçmemek.
+Veri toplama, değişmez ham veri sürümleme ve sağlayıcı revizyon tespiti altyapısını kurmak; ardından D022 ve D023 durum kodlarını modüler veri temizleme akışına taşımak.

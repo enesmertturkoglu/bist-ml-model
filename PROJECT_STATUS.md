@@ -6,9 +6,9 @@
 
 Kaynak kabul testinde tespit edilen hibrit fiyat ölçeği sorunu için tek fiyat kaynağı yaklaşımı kesinleştirildi.
 
-İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. Tek kaynaklı kabul kodu ve birim testleri tamamlandı.
+İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. Tek kaynaklı kabul kodu, repo içi dayanıklı İş Yatırım istemcisi ve birim testleri tamamlandı.
 
-`2026-07-26` gerçek veri kabul koşusu, İş Yatırım yıllık isteklerindeki yaygın okuma zaman aşımları nedeniyle `FAIL` üretti; bu sonuç yFinance nominal OHLC iç tutarlılığına ilişkin bir başarısızlık değildir. Sağlayıcı koşusu eksiksiz tamamlanmadan kaynak kabulü verilmedi. Sıradaki görev İş Yatırım erişimi kararlı olduğunda kabul testini yeniden çalıştırmak ve ardından veri toplama/temizleme altyapısına geçmektir.
+`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul aşaması tamamlandı; sıradaki görev veri toplama ve temizleme altyapısıdır.
 
 ## Tamamlananlar
 
@@ -98,7 +98,15 @@ Kaynak kabul testinde tespit edilen hibrit fiyat ölçeği sorunu için tek fiya
 - Kaynak kabul testi yFinance nominal OHLC iç tutarlılığını ana kriter, İş Yatırım fiyat farkını yalnız kalite uyarısı olarak kullanacak şekilde düzenlendi.
 - `NO_OPEN`, `NO_TRADE`, `INVALID_OHLC`, `SOURCE_VOLUME_CONFLICT` ve `CORPORATE_ACTION_WINDOW` durumları kabul testinde üretilebilir hale getirildi.
 - Provider alanlarının korunması, nominal OHLC iç geçerliliği, çapraz kaynak uyarısının satırı dışlamaması ve split faktörünün feature listesinde olmaması dahil 17 birim test tamamlandı.
-- Gerçek veri kabul koşusu iki kez ağ erişimiyle denendi; İş Yatırım okuma zaman aşımları nedeniyle eksiksiz kaynak koşulu sağlanamadı ve raporlar `FAIL` olarak yeniden üretildi. Sahte veya önbelleğe alınmış veriyle başarı üretilmedi.
+- Önceki gerçek veri kabul koşuları, kurulu istemcinin sabit 10 saniyelik timeout'u nedeniyle İş Yatırım okuma zaman aşımı üretmiş ve dürüstçe `FAIL` olarak raporlanmıştı; sahte veya elle oluşturulmuş veriyle başarı üretilmedi.
+- Kurulu `site-packages` değiştirilmeden, `(connect=10, read=60)` timeout, sıralı istek, retry/backoff+jitter, `12→6→3` aylık uyarlamalı parçalama ve atomik yerel cache sağlayan repo içi İş Yatırım istemcisi oluşturuldu.
+- Dayanıklı istemci timeout/retry, 6 ve 3 aylık parçalama, minimum parça hatası, kısmi başarı cache'i, cache hit/eksik aralık/bozuk cache, tekrar temizleme, HTTP 429/5xx, kalıcı şema hatası, sleep/jitter enjeksiyonu ve timeout aktarımı senaryolarıyla test edildi.
+- İlk dayanıklı gerçek koşuda 70 yıllık İş Yatırım ağ isteğinin tamamı başarılı oldu; timeout, retry, alt parçalama ve tamamen başarısız parça sayısı `0` olarak ölçüldü.
+- Operasyonel cache 70 veri ve 70 metadata parçasıyla dolduruldu. İkinci doğrulama koşusu 70 cache hit, `0` İş Yatırım ağ isteği ve aynı `PASS` sonucunu verdi.
+- Eksiksiz gerçek koşuda beş hisselik tam dönemde `7.945` İş Yatırım gününün `7.942` tanesi yFinance ile eşleşti; 3 nominal open eksik, 0 nominal OHLC geçersiz ve değerlendirilebilir nominal OHLC geçerliliği `%100` ölçüldü.
+- Tüm test dönemlerinde 7 eksik nominal OHLC satırı açık durumlarla dışlanabilir bulundu; 14.386 çapraz kaynak fiyat farkı yalnız kalite uyarısı olarak raporlandı ve kabul sonucunu etkilemedi.
+- D022 uygulanabilir bulundu; açılış mevcutken iki hacmin birlikte eksik olduğu kayıt sayısı `0` kaldı. D023 uygulanabilir bulundu ve 213 tahmin satırı `CORPORATE_ACTION_WINDOW` ile işaretlenebilir ölçüldü.
+- Dayanıklı tek fiyat kaynaklı kabul sonucu `PASS` oldu ve kaynak kabul aşaması tamamlandı.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -140,25 +148,22 @@ Kaynak kabul testinde tespit edilen hibrit fiyat ölçeği sorunu için tek fiya
 
 ## Sıradaki Görevler
 
-1. İş Yatırım erişimi kararlı olduğunda tek kaynaklı yFinance nominal OHLC kabul testini yeniden çalıştır.
-2. Eksiksiz gerçek veri koşusunda yFinance nominal OHLC'nin kendi iç tutarlılığını doğrula.
-3. D022 ve D023 durum kodlarını modüler veri temizleme kodunda uygula.
-4. Veri toplama ve ham veri sürümleme altyapısını oluştur.
-5. Kod değiştiren hisselerin eşlemesini test et.
-6. Label üretim koduna geç.
+1. Veri toplama, değişmez ham veri sürümleme ve sağlayıcı revizyon tespiti altyapısını oluştur.
+2. D022 ve D023 durum kodlarını modüler veri temizleme kodunda uygula.
+3. Kod değiştiren hisselerin eşlemesini test et.
+4. Label üretim koduna geç.
 
 ## Sonraki Ana Aşamalar
 
-1. Kaynak kabul testi ve gerçek veri sütunlarının doğrulanması
-2. Veri toplama ve temizleme
-3. Label üretim kodu ve testleri
-4. Feature engineering
-5. LightGBM eğitimi
-6. Walk-forward test
-7. Backtest
-8. Kontrollü deneyler
-9. Paper trading
-10. Günlük raporlama sistemi
+1. Veri toplama ve temizleme
+2. Label üretim kodu ve testleri
+3. Feature engineering
+4. LightGBM eğitimi
+5. Walk-forward test
+6. Backtest
+7. Kontrollü deneyler
+8. Paper trading
+9. Günlük raporlama sistemi
 
 ## Açık Sorular
 

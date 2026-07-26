@@ -111,4 +111,6 @@ Ana model dönemi `2020-03-13` tarihinde başlar.
 
 Standart normal adi paylarda tavan açılış `%10` marj ve içeri doğru fiyat adımı yuvarlamasıyla hesaplanır.
 
-Sıradaki aşama tarihsel hisse evreni ve özel işlem durumu istisnalarıdır.
+Tek fiyat kaynaklı dayanıklı kabul koşusu eksiksiz gerçek veride `PASS` ile tamamlanmıştır.
+
+Sıradaki aşama veri toplama ve temizleme altyapısıdır.
