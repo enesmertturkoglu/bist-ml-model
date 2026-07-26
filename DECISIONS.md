@@ -704,6 +704,28 @@ Referans veri, merkezi config, tavan hesabı, D022 işlem uygunluğu temizlemesi
 **Tarih:**
 2026-07-26
 
+### D027 — Sade BİST Security Kimliği ve Tarih-Etkin Ticker Mapping
+
+**Karar:**
+Projenin kalıcı şirket payı kimliği `security_id` olacaktır. Resmî kaynaktan doğrulanıp `reference_data/bist_security_ticker_map_v1.csv` dosyasına açıkça eklenen eski ve yeni ticker'lar, dahil başlangıç ve dahil bitiş tarihleriyle aynı `security_id` altında birleştirilebilir. Şirket adı veya fiyat serisi benzerliğinden otomatik eşleme üretilmeyecektir.
+
+Mapping'de bulunmayan güncel ticker yeni bir security kabul edilecek ve `SEC_<SHA256("BIST:EQUITY:" + NORMALIZED_TICKER) ilk 12 hex>` kuralıyla deterministik kimlik alacaktır. Normalizasyonda boşluklar temizlenir, ticker büyük harfe çevrilir ve `.IS` sağlayıcı uzantısı kaldırılır. Bu durum `AUTO_NEW_TICKER` olarak denetlenir; veri toplama veya model eğitimi için dışlama ya da durdurma nedeni değildir. Yeni halka arzlar da aynı davranışla sisteme girer.
+
+Mapping güncel değilken kod değiştiren bir payın eski ve yeni ticker'ı geçici olarak iki security'ye ayrılabilir; bu risk bilinçli olarak kabul edilmiştir. Mapping daha sonra resmî kaynak ve geçiş tarihleriyle güncellendiğinde açık `security_id` otomatik kimliğin önüne geçer, seri yeniden hazırlanır ve sonraki model eğitimi yeni mapping sürümüyle yapılır. Kod kendi başına KAP veya Borsa İstanbul'dan eşleme kararı üretmez.
+
+Provider sorguları her mapped ticker için yalnız geçerli tarih aralığına kırpılır. Kaynaktaki ticker `observed_ticker` olarak korunur; geçmiş ticker güncel ticker ile değiştirilmez. Aynı `security_id + trade_date` için mükerrer sağlayıcı satırında tarih-etkin açık mapping kaydı tercih edilir. Mapping sürümü ve checksum'u derived snapshot metadata'sına taşınır; mapping değişikliği eski snapshot'ı değiştirmeden yeni derived çıktı üretir.
+
+İlk sürüm kimlik çözümünde ISIN kullanılmayacaktır; referans veriye, doğrulamaya veya pipeline'a eklenmeyecektir.
+
+**Gerekçe:**
+Sade, deterministik ve elle doğrulanan tarih-etkin mapping; ticker değişiklikleri boyunca serileri birleştirirken yeni halka arzların ve henüz eşlenmemiş ticker'ların veri akışını durdurmamasını sağlar. Otomatik benzerlik eşlemesinin reddedilmesi yanlış şirket birleşimi riskini sınırlar.
+
+**Etkilenen alanlar:**
+Aktif ticker evreni, provider sorgu planı, nominal security birleştirmesi, clean/label snapshot kimliği ve provenance alanları, ilerideki feature gruplaması, merkezi config, veri sözlüğü ve birim testleri.
+
+**Tarih:**
+2026-07-27
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

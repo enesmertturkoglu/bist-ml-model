@@ -19,6 +19,7 @@ from src.data.cleaning_pipeline import (  # noqa: E402
 )
 from src.data.collectors import current_code_commit_sha  # noqa: E402
 from src.data.price_limits import PriceStepTable  # noqa: E402
+from src.data.security_identity import TickerMapping  # noqa: E402
 
 
 def _snapshot_set(value: str) -> CleaningSnapshotSet:
@@ -48,6 +49,12 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--data-root", type=Path, default=Path("data"))
+    parser.add_argument("--security-identity-snapshot-id")
+    parser.add_argument(
+        "--ticker-mapping",
+        type=Path,
+        default=PROJECT_ROOT / MarketDataConfig().security_ticker_mapping_path,
+    )
     parser.add_argument(
         "--report-dir", type=Path, default=Path("reports/data_cleaning")
     )
@@ -64,6 +71,14 @@ def main() -> int:
         else PROJECT_ROOT / config.tick_size_reference_path
     )
     price_steps = PriceStepTable.from_csv(reference_path)
+    mapping = (
+        TickerMapping.from_csv(
+            args.ticker_mapping,
+            checksum_algorithm=config.checksum_algorithm,
+        )
+        if args.security_identity_snapshot_id is not None
+        else None
+    )
     pipeline = MarketDataCleaningPipeline(
         config,
         code_commit_sha=current_code_commit_sha(PROJECT_ROOT),
@@ -72,6 +87,8 @@ def main() -> int:
         args.snapshot_set,
         price_steps,
         exception_limit=args.exception_limit,
+        security_identity_snapshot_id=args.security_identity_snapshot_id,
+        ticker_mapping=mapping,
     )
     args.report_dir.mkdir(parents=True, exist_ok=True)
     summary_path = args.report_dir / "cleaning_summary.json"

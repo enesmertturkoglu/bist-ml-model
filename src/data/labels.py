@@ -28,6 +28,15 @@ REQUIRED_CLEAN_LABEL_COLUMNS = {
     "entry_exclusion_reasons",
     "requires_review",
 }
+IDENTITY_AUDIT_COLUMNS = (
+    "security_id",
+    "observed_ticker",
+    "current_ticker",
+    "ticker_mapping_status",
+    "ticker_mapping_rule_id",
+    "ticker_mapping_version",
+    "ticker_mapping_checksum",
+)
 
 
 class LabelGenerationError(ValueError):
@@ -146,7 +155,7 @@ def _base_output(
     entry_date = row["entry_date"]
     t2_date = next_dates.get(entry_date)
     t3_date = next_dates.get(t2_date) if t2_date is not None else None
-    return {
+    output = {
         "ticker": str(row["ticker"]),
         "prediction_date": row["prediction_date"],
         "entry_date": entry_date,
@@ -168,6 +177,10 @@ def _base_output(
         "exit_reason": pd.NA,
         "gross_return": None,
     }
+    for column in IDENTITY_AUDIT_COLUMNS:
+        if column in row:
+            output[column] = row[column]
+    return output
 
 
 def _exclude(output: dict[str, Any], reasons: Sequence[str]) -> None:
@@ -202,17 +215,24 @@ def build_three_day_target_labels(
 
     frame = clean_frame.copy()
     frame["ticker"] = frame["ticker"].astype(str).str.upper()
+    entity_column = "security_id" if "security_id" in frame.columns else "ticker"
+    if entity_column == "security_id" and frame["security_id"].isna().any():
+        raise LabelGenerationError("clean snapshot contains a missing security_id")
     for column in ("prediction_date", "entry_date"):
         frame[column] = pd.to_datetime(frame[column]).dt.normalize()
-    if frame.duplicated(["ticker", "prediction_date"]).any():
-        raise LabelGenerationError("clean snapshot has duplicate ticker/prediction_date rows")
-    if frame.duplicated(["ticker", "entry_date"]).any():
-        raise LabelGenerationError("clean snapshot has duplicate ticker/entry_date rows")
+    if frame.duplicated([entity_column, "prediction_date"]).any():
+        raise LabelGenerationError(
+            f"clean snapshot has duplicate {entity_column}/prediction_date rows"
+        )
+    if frame.duplicated([entity_column, "entry_date"]).any():
+        raise LabelGenerationError(
+            f"clean snapshot has duplicate {entity_column}/entry_date rows"
+        )
 
     next_dates = _global_next_dates(frame)
-    by_entry = frame.set_index(["ticker", "entry_date"], drop=False)
+    by_entry = frame.set_index([entity_column, "entry_date"], drop=False)
     outputs: list[dict[str, Any]] = []
-    ordered = frame.sort_values(["ticker", "prediction_date"])
+    ordered = frame.sort_values([entity_column, "prediction_date"])
     for source in ordered.to_dict(orient="records"):
         output = _base_output(source, next_dates)
         outputs.append(output)
@@ -259,7 +279,7 @@ def build_three_day_target_labels(
         horizon_rows: list[Mapping[str, Any]] = []
         missing_horizon_row = False
         for horizon_date in horizon_dates:
-            key = (source["ticker"], horizon_date)
+            key = (source[entity_column], horizon_date)
             if key not in by_entry.index:
                 missing_horizon_row = True
                 break
@@ -337,7 +357,7 @@ def build_three_day_target_labels(
         "exit_reason",
     ):
         result[column] = result[column].astype("string")
-    return result.sort_values(["ticker", "prediction_date"]).reset_index(drop=True)
+    return result.sort_values([entity_column, "prediction_date"]).reset_index(drop=True)
 
 
 def summarize_labels(frame: pd.DataFrame) -> dict[str, Any]:

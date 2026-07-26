@@ -4,11 +4,11 @@
 
 ## Mevcut Aşama
 
-D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiyat adımı ve üç BİST işlem günlük label üretim altyapısı tamamlandı.
+D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiyat adımı, üç BİST işlem günlük label üretimi ve D027 sade security kimliği/tarih-etkin ticker mapping altyapısı tamamlandı.
 
 İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. İki kaynağın ham verileri birbirinden bağımsız `raw` snapshot'larda; yFinance nominal OHLC ise kaynak snapshot kimliğine bağlı ayrı `derived` katmanda saklanır. Canonical checksum, atomik yazma, manifest doğrulaması ve revision fark raporu eski snapshot'ların üzerine yazılmasını önler.
 
-`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul, snapshot/revision, temizleme, fiyat adımı ve label üretimi tamamlandı. Sıradaki görev kod değiştiren aktif hisselerin doğrulanmış eşlemesini tamamlamak; ardından feature engineering hazırlığına geçmektir.
+`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul, snapshot/revision, temizleme, fiyat adımı, label ve security identity üretimi tamamlandı. Mapping bulunmayan ticker yeni security olarak kesintisiz işlenir; mapping güncel değilken kod değişikliği tarihsel seriyi geçici olarak bölebilir. Sıradaki görev feature kullanılabilirlik kurallarını ve feature kataloğunu hazırlamaktır.
 
 ## Tamamlananlar
 
@@ -137,6 +137,14 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Giriş uygun değilse, inceleme gerekiyorsa, source dışlama nedeni varsa, global BİST takvim zinciri T+1–T+3'ü tamamlamıyorsa veya gerekli nominal horizon fiyatı geçersizse label `0` yapılmaz; `label_status=NA` ve açık neden üretilir. Horizon ticker satır sırasına göre kaydırılmaz ve T+4 high label'a girmez.
 - Label/çıkış/takvim/NA/provenance/idempotence ve D020 kapsam senaryolarını kapsayan 42 test eklendi; mevcutlarla birlikte toplam 195 test geçti.
 - THYAO clean snapshot `snap_80ea98811d6a6f3a_r0001_0141392192f1`, `5f88b4e` label kod commit'iyle gerçek küçük koşuda işlendi. Yeni `COMPLETE` label snapshot `snap_f96b510dccc9ac70_r0001_bda32acb908b` oldu: 6 satırın 3'ü pozitif, 1'i negatif, 2'si `INCOMPLETE_HORIZON` nedeniyle `NA`; üç hedefin tamamı T+3'te gerçekleşti. Label içerik checksum'u `fb399ce13977708be6d877ef2dbe6498146403730d93fa2c3ce18944ae91f781`, doğrudan kaynak clean checksum'u `7350ad8a5c39f32942f616c4ea8ffd2193691e70982c099d604d6c8e7096d030` olarak metadata'da doğrulandı.
+- D027 ile ticker'dan bağımsız kalıcı `security_id`, dahil tarih aralıklı resmî mapping ve mapping bulunmayan ticker için SHA-256 tabanlı deterministik `AUTO_NEW_TICKER` davranışı uygulandı.
+- `reference_data/bist_security_ticker_map_v1.csv` yalnız açıkça doğrulanmış değişikliklerin ekleneceği sürümlü şema olarak oluşturuldu; bu görevde doğrulanmamış gerçek ticker eşlemesi eklenmedi.
+- Aktif ticker toplama planı mapped eski/güncel provider sembollerini yalnız geçerli dönemlerinde sorgular; yFinance sembolüne `.IS` yalnız provider sınırında eklenir. Mapping bulunmayan ticker doğrudan sorgulanır ve akışı durdurmaz.
+- Doğrulanmış `COMPLETE` nominal snapshot'lar `security_identity/nominal_ohlc` derived katmanında `security_id + date` ile birleştirilir. Tarih dışı provider satırları elenir, tarih-etkin açık mapping satırı deterministik olarak tercih edilir ve kaynak ticker `observed_ticker` olarak korunur.
+- Identity alanları isteğe bağlı yeni tam veri yolunda clean ve label snapshot'larına taşınır; iki dönem aynı `security_id` ile gruplanır. Eski identity alanı içermeyen küçük clean/label snapshot akışı geriye uyumlu bırakıldı.
+- Mapping sürümü/checksum'u identity, clean ve label metadata'sına bağlandı. Aynı input/mapping idempotenttir; mapping değişikliği eski snapshot'ı değiştirmeden yeni derived snapshot üretir.
+- Mapping bulunmayan yeni halka arz benzeri kısa seri kabul edilir. Mapping güncel değilken kod değiştiren bir pay geçici olarak ayrı security olabilir; mapping düzeltildikten sonra veri yeniden hazırlanmalı ve model yeniden eğitilmelidir.
+- Kısa Türkçe işletim belgesi `SECURITY_MAPPING_AND_TRAINING_DATA.md` eklendi.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -157,7 +165,8 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Evren referansı: Veri toplama başlangıcındaki güncel aktif BİST şirket payları
 - Tarihsel kullanım: Aynı aktif liste bütün geçmiş veri dönemine uygulanacak
 - Kot dışı ve günümüzde aktif olmayan hisseler: İlk sürüme dahil edilmeyecek
-- Kod değiştiren aktif hisseler: Eski ve yeni kodlar aynı `security_id` altında eşleştirilecek
+- Kod değiştiren aktif hisseler: Yalnız doğrulanmış tarih-etkin mapping varsa eski ve yeni kodlar aynı `security_id` altında eşleştirilecek
+- Mapping bulunmayan ticker: Deterministik otomatik kimlikle yeni security kabul edilecek; veri akışı durmayacak
 - Kod eşleştirme kaynağı: Borsa İstanbul ve gerektiğinde KAP
 - Finansal araç kapsamı: Yalnızca şirket payları
 - Bilinen sınırlama: Survivorship bias
@@ -170,6 +179,7 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Her kesin karar sonrasında `DECISIONS.md` güncellenir.
 - Her tamamlanan ana aşama sonrasında `PROJECT_STATUS.md` güncellenir.
 - Veri, feature veya deney içeriği netleştiğinde ilgili özel belge güncellenir.
+- Security mapping güncelleme ve yeniden üretim akışı: `SECURITY_MAPPING_AND_TRAINING_DATA.md`
 - Teknik çalışmaya başlamadan önce GitHub'daki güncel dosyalar okunur.
 - Sohbet içi ve geçici dosya kopyaları bağlayıcı değildir.
 - Gerekli belge veya kod değişikliği doğduğunda sohbet, doğrudan Codex'e kopyalanabilir görev talimatı verir.
@@ -178,8 +188,7 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Görevler
 
-1. Kod değiştiren aktif hisselerin resmî kayıtlarla eşlemesini ve tarih-etkin `security_id` tablosunu oluşturup test et.
-2. Feature engineering için kullanılabilirlik zamanlarını ve feature kataloğunu hazırlamaya başla.
+1. Feature engineering için tahmin anındaki kullanılabilirlik kurallarını ve `FEATURE_CATALOG.md` içeriğini hazırla.
 
 ## Sonraki Ana Aşamalar
 

@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.config import MarketDataConfig  # noqa: E402
 from src.data.collectors import MarketDataCollector  # noqa: E402
+from src.data.security_identity import TickerMapping  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,6 +47,12 @@ def parse_args() -> argparse.Namespace:
         default=defaults.data_root,
         help="Root containing raw, derived and manifest layers",
     )
+    parser.add_argument(
+        "--ticker-mapping",
+        type=Path,
+        default=PROJECT_ROOT / defaults.security_ticker_mapping_path,
+        help="date-effective BIST ticker mapping CSV",
+    )
     return parser.parse_args()
 
 
@@ -54,7 +61,11 @@ def main() -> int:
     if args.start_date > args.end_date:
         raise SystemExit("--start-date must be on or before --end-date")
     config = replace(MarketDataConfig(), data_root=args.data_root)
-    collector = MarketDataCollector(config)
+    mapping = TickerMapping.from_csv(
+        args.ticker_mapping,
+        checksum_algorithm=config.checksum_algorithm,
+    )
+    collector = MarketDataCollector(config, ticker_mapping=mapping)
     results = collector.collect_many(args.tickers, args.start_date, args.end_date)
     for ticker_result in results:
         print(f"{ticker_result.ticker}: complete={ticker_result.complete}")
@@ -67,6 +78,8 @@ def main() -> int:
                     f"dataset={snapshot.dataset_type} status={snapshot.snapshot_status.value} "
                     f"revision={snapshot.revision_number} id={snapshot.snapshot_id}"
                 )
+    print(f"ticker_mapping={args.ticker_mapping}")
+    print(f"ticker_mapping_checksum={mapping.checksum}")
     return 0 if all(item.complete for item in results) else 1
 
 

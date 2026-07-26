@@ -14,6 +14,11 @@ import pandas as pd
 
 from src.config import MarketDataConfig, SnapshotStatus
 from src.data.isyatirim_client import IsYatirimClient, IsYatirimFetchError
+from src.data.security_identity import (
+    TickerMapping,
+    normalize_ticker,
+    plan_active_ticker_collection,
+)
 from src.data.snapshot_store import (
     SnapshotMetadata,
     SnapshotRequest,
@@ -88,6 +93,7 @@ class MarketDataCollector:
         yfinance_fetcher: YFinanceFetcher | None = None,
         sleep_func: Callable[[float], None] = time.sleep,
         code_commit_sha: str | None = None,
+        ticker_mapping: TickerMapping | None = None,
     ) -> None:
         self.config = config or MarketDataConfig()
         self.snapshot_store = snapshot_store or SnapshotStore(self.config)
@@ -102,12 +108,14 @@ class MarketDataCollector:
         self.yfinance_fetcher = yfinance_fetcher or _fetch_yfinance_history
         self.sleep_func = sleep_func
         self.code_commit_sha = code_commit_sha or current_code_commit_sha()
+        self.ticker_mapping = ticker_mapping
         self.isyatirim_version = _package_version("isyatirimhisse")
         self.yfinance_version = _package_version("yfinance")
 
     def collect_isyatirim(
         self, ticker: str, start_date: date, end_date: date
     ) -> SourceCollectionResult:
+        ticker = normalize_ticker(ticker)
         request = SnapshotRequest(
             source="isyatirim",
             dataset_type="equity_history",
@@ -147,6 +155,7 @@ class MarketDataCollector:
     def collect_yfinance(
         self, ticker: str, start_date: date, end_date: date
     ) -> SourceCollectionResult:
+        ticker = normalize_ticker(ticker)
         raw_request = SnapshotRequest(
             source="yfinance",
             dataset_type="equity_history",
@@ -221,7 +230,7 @@ class MarketDataCollector:
     ) -> TickerCollectionResult:
         """Run both providers even if one source returns a failed snapshot."""
 
-        normalized_ticker = ticker.strip().upper()
+        normalized_ticker = normalize_ticker(ticker)
         results = (
             self.collect_isyatirim(normalized_ticker, start_date, end_date),
             self.collect_yfinance(normalized_ticker, start_date, end_date),
@@ -231,6 +240,17 @@ class MarketDataCollector:
     def collect_many(
         self, tickers: Iterable[str], start_date: date, end_date: date
     ) -> tuple[TickerCollectionResult, ...]:
+        if self.ticker_mapping is not None:
+            periods = plan_active_ticker_collection(
+                tickers,
+                start_date,
+                end_date,
+                self.ticker_mapping,
+            )
+            return tuple(
+                self.collect_ticker(period.ticker, period.start_date, period.end_date)
+                for period in periods
+            )
         return tuple(
             self.collect_ticker(ticker, start_date, end_date) for ticker in tickers
         )
@@ -267,7 +287,7 @@ def _fetch_yfinance_history(
 ) -> pd.DataFrame:
     import yfinance as yf
 
-    return yf.Ticker(f"{ticker.strip().upper()}.IS").history(
+    return yf.Ticker(f"{normalize_ticker(ticker)}.IS").history(
         start=start_date.isoformat(),
         # yFinance end is exclusive; collection requests use inclusive dates.
         end=(end_date + timedelta(days=1)).isoformat(),

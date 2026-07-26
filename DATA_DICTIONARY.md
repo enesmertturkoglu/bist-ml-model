@@ -1,6 +1,6 @@
 # DATA DICTIONARY
 
-**Son doğrulama:** 2026-07-26
+**Son doğrulama:** 2026-07-27
 
 **Doğrulama kapsamı:** `scripts/source_acceptance_test.py` ile THYAO, GARAN, ASELS, BIMAS, TUPRS, EREGL, SISE, SASA, KCHOL ve HEKTS gerçek yanıtları
 
@@ -22,7 +22,7 @@ data/
 ```
 
 - `raw`: Sağlayıcı alanları ve değerleri değiştirilmeden saklanır. yFinance tarih indeksi yalnız serializasyon için yerel `date` sütununa taşınır ve istek tickera `ticker` kimliği eklenir. İş Yatırım'ın kabul edilmiş yardımcı alanları aynı ham frame içinde korunur.
-- `derived`: Ham veriyle karışmayan dönüşüm çıktılarıdır. `yfinance/nominal_ohlc` D024 nominal OHLC ve split-normalizasyon denetim alanlarını; `cleaning/market_data_eligibility` D022/D023 temizleme, kalite ve işlem uygunluğu alanlarını içerir. Her türetilmiş snapshot kaynak ham/türetilmiş snapshot'larına `input_snapshot_ids` ile bağlanır.
+- `derived`: Ham veriyle karışmayan dönüşüm çıktılarıdır. `yfinance/nominal_ohlc` D024 nominal OHLC ve split-normalizasyon denetim alanlarını; `security_identity/nominal_ohlc` D027 security birleştirmesini; `cleaning/market_data_eligibility` D022/D023 temizleme, kalite ve işlem uygunluğu alanlarını içerir. Her türetilmiş snapshot kaynak ham/türetilmiş snapshot'larına `input_snapshot_ids` ile bağlanır.
 - `manifests`: Commit edilmiş snapshot kayıtları ile gerçek sağlayıcı revision farklarını tutar. Geçici `.snapshot-tmp-*` dosya veya dizinleri manifest kaydı olmadan geçerli snapshot sayılmaz.
 
 Snapshot verileri ek bir Parquet bağımlılığı gerektirmeyen `canonical-jsonl-v1` biçiminde saklanır. Checksum öncesinde sütun ve satır sırası, tarih, sayısal değer ve null gösterimi deterministik hale getirilir. Varsayılan algoritma `sha256`dır. Fiziksel veri ve metadata önce aynı dosya sisteminde geçici dizine yazılır, ardından atomik olarak son değişmez dizinine taşınır; manifest atomik olarak son commit sınırıdır.
@@ -32,7 +32,7 @@ Snapshot verileri ek bir Parquet bağımlılığı gerektirmeyen `canonical-json
 | Alan | Veri tipi | Anlamı ve doğrulama kuralı |
 | --- | --- | --- |
 | `snapshot_id` | `string` | Mantıksal dataset anahtarı, revision numarası, içerik ve şema checksum'ından yeniden üretilebilen kararlı kimlik |
-| `source` | `string` | `yfinance`, `isyatirim` veya türetilmiş uygunluk için `cleaning`; kaynak revision zincirleri birbirinden bağımsızdır |
+| `source` | `string` | `yfinance`, `isyatirim`, `security_identity`, `cleaning` veya `labels`; kaynak revision zincirleri birbirinden bağımsızdır |
 | `dataset_type` | `string` | Örneğin `equity_history`, `nominal_ohlc` veya `market_data_eligibility` |
 | `ticker_or_instrument` | `string` | İstek kapsamındaki ticker/endeks/enstrüman kimliği; ayrı mantıksal zincir oluşturur |
 | `request_start_date` | ISO `date` | İstek döneminin kapsayıcı başlangıcı; dönem izolasyonunun parçasıdır |
@@ -162,7 +162,39 @@ yFinance çağrıları `.IS` uzantılı semboller, `auto_adjust=False` ve `actio
 
 Referans tablosu yüklenirken her rejimin `[0.01, ∞)` fiyat aralığını boşluksuz/çakışmasız kapattığı, tarih rejimlerinin ardışık olduğu, resmî kaynak metadata'sının tam bulunduğu ve checksum biçiminin SHA-256 olduğu doğrulanır. Bilinmeyen tarih veya pay dışı araç için kural döndürülmez.
 
-## D022/D023/D026 Temiz Snapshot Alanları
+## D027 Security Kimliği ve Ticker Mapping Alanları
+
+`reference_data/bist_security_ticker_map_v1.csv`, yalnız açıkça doğrulanıp elle eklenen ticker değişikliklerini dahil tarih aralıklarıyla taşır. Boş referans dosyası geçerlidir; mapping'de bulunmayan ticker veri akışını durdurmadan deterministik otomatik security olur. Aynı security altındaki aralıklar ve aynı ticker'ın farklı security'lere bağlandığı aralıklar çakışamaz.
+
+| Mapping alanı | Anlamı |
+| --- | --- |
+| `security_id` | Eski ve güncel ticker dönemlerini birleştiren kalıcı pay kimliği |
+| `ticker` | Sağlayıcı uzantısı kaldırılmış büyük harf BİST işlem kodu |
+| `valid_from` | Ticker döneminin dahil ilk geçerli tarihi |
+| `valid_to` | Ticker döneminin dahil son geçerli tarihi; güncel açık uçlu dönemde boş |
+| `is_current_ticker` | Satırın security için güncel ticker olup olmadığı |
+| `mapping_status` | Elle doğrulanmış referans satırının durumu; doğrulanmış satırda `CONFIRMED` |
+| `official_source_name` | Doğrulamada kullanılan resmî kurum |
+| `official_source_reference` | Resmî duyuru/belge referansı |
+| `official_source_date` | Resmî belgenin tarihi |
+| `official_source_url` | Resmî kaynak bağlantısı |
+| `notes` | Kapsam ve doğrulama notu |
+
+`security_identity/nominal_ohlc`, yalnız checksum doğrulamasından geçen `COMPLETE` yFinance nominal snapshot'larını okur, kaynak snapshot'ları değiştirmez ve aynı `security_id + date` serisini ayrı değişmez derived snapshot olarak yazar. Geçerlilik dışı provider satırı kullanılmaz; mükerrer kayıtta tarih-etkin açık mapping satırı tercih edilir. Mapping sürümü/checksum'u snapshot istek metadata'sında ve her satırda saklanır.
+
+| Çıktı alanı | Kaynak/formül | Anlamı | Feature kuralı |
+| --- | --- | --- | --- |
+| `security_id` | Açık mapping; yoksa `SEC_` + `SHA256("BIST:EQUITY:" + normalized_ticker)` ilk 12 hex | Ticker dönemlerinden bağımsız kalıcı gruplama kimliği | Yalnız kimlik ve rolling/group anahtarıdır; sinyal değildir |
+| `observed_ticker` | Provider satırındaki normalize ticker | İlgili tarihte gerçekten gözlenen kod; geçmiş değer değiştirilmez | Kimlik/audit alanıdır |
+| `current_ticker` | Aynı security'nin `is_current_ticker=true` satırı; otomatik security'de observed ticker | Güncel provider/raporlama kodu | Feature yapılmaz |
+| `ticker_mapping_status` | Resolver | `MAPPED_CURRENT_TICKER`, `MAPPED_HISTORICAL_TICKER`, `AUTO_NEW_TICKER` veya `OUTSIDE_VALIDITY` | Feature yapılmaz; otomatik durum dışlama değildir |
+| `ticker_mapping_rule_id` | Mapping satırının canonical SHA-256 özeti | Kullanılan tarih-etkin kural kimliği; otomatik/geçerlilik dışı durumda boş | Lineage; feature yapılmaz |
+| `ticker_mapping_version` | Mapping dosya adı/sürümü | Identity çözümünün referans sürümü | Lineage; feature yapılmaz |
+| `ticker_mapping_checksum` | Normalize mapping içeriğinin SHA-256 özeti | Aynı mapping'in yeniden üretilebilir kimliği | Lineage; feature yapılmaz |
+
+Identity-etkin yeni tam veri yolunda bu yedi alan clean ve label snapshot'larına taşınır; clean ve label satır kimliği/gruplaması `security_id + prediction_date` olur. Eski identity alanı içermeyen küçük snapshot'lar geriye uyumlu olarak `ticker + prediction_date` kullanmaya devam eder. Gelecekteki feature rolling hesapları `ticker` yerine `security_id` ile yapılmalı; mapping durumu, geçiş tarihi, güncel ticker ve resmî kaynak metadata'sı modele verilmemelidir.
+
+## D022/D023/D026/D027 Temiz Snapshot Alanları
 
 `cleaning/market_data_eligibility` yalnız fiziksel checksum'ı doğrulanan `COMPLETE` İş Yatırım raw, yFinance raw ve ilgili yFinance raw snapshot ID'sini `input_snapshot_ids` içinde taşıyan `yfinance/nominal_ohlc` snapshot'larından üretilir. Ana takvim, TL hacmi, kurumsal aksiyon sinyali ve fiyat kalite karşılaştırması İş Yatırım'dan; fiyat bağımlı bütün hesaplar yalnız yFinance nominal OHLC'den gelir. Ham snapshot'lar değiştirilmez.
 

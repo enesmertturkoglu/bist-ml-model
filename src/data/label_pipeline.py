@@ -108,12 +108,28 @@ class LabelGenerationPipeline:
                     self.config.checksum_algorithm
                 ),
                 "tick_rule_set_ids": list(price_steps.rule_set_ids),
+                **(
+                    {
+                        "ticker_mapping_version": metadata.request_parameters[
+                            "ticker_mapping_version"
+                        ],
+                        "ticker_mapping_checksum": metadata.request_parameters[
+                            "ticker_mapping_checksum"
+                        ],
+                    }
+                    if "ticker_mapping_checksum" in metadata.request_parameters
+                    else {}
+                ),
             },
             provider_library_version="derived-labels-v1",
             code_commit_sha=self.code_commit_sha,
             layer="derived",
             input_snapshot_ids=(metadata.snapshot_id,),
-            identity_columns=("ticker", "prediction_date"),
+            identity_columns=(
+                ("security_id", "prediction_date")
+                if "security_id" in labels.columns
+                else ("ticker", "prediction_date")
+            ),
         )
         written = self.snapshot_store.save_dataframe(labels, request)
         summary = summarize_labels(labels)

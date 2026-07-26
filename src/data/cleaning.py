@@ -62,7 +62,19 @@ NON_FEATURE_AUDIT_COLUMNS = {
     "estimated_upper_limit",
     "price_step_resolution_status",
     "official_source_document",
+    "observed_ticker",
+    "current_ticker",
+    "ticker_mapping_status",
+    "ticker_mapping_rule_id",
+    "ticker_mapping_version",
+    "ticker_mapping_checksum",
 }
+
+
+def _entity_column(frame: pd.DataFrame) -> str:
+    if "security_id" in frame.columns and frame["security_id"].notna().all():
+        return "security_id"
+    return "ticker"
 
 
 def normalize_isyatirim_history(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
@@ -367,33 +379,38 @@ def add_corporate_action_windows(
     result["date"] = pd.to_datetime(result["date"]).dt.normalize()
     calendar = tuple(sorted(pd.to_datetime(pd.Index(bist_calendar)).normalize().unique()))
     position = {value: index for index, value in enumerate(calendar)}
+    entity_column = _entity_column(result)
     action_lookup = {
-        (str(row.ticker), pd.Timestamp(row.date)): bool(row.corporate_action_flag)
-        for row in result[["ticker", "date", "corporate_action_flag"]].itertuples(index=False)
+        (str(entity), pd.Timestamp(day)): bool(flag)
+        for entity, day, flag in result[
+            [entity_column, "date", "corporate_action_flag"]
+        ].itertuples(index=False, name=None)
     }
     source_lookup = {
-        (str(row.ticker), pd.Timestamp(row.date)): list(row.corporate_action_signal_sources)
-        for row in result[["ticker", "date", "corporate_action_signal_sources"]].itertuples(index=False)
+        (str(entity), pd.Timestamp(day)): list(sources)
+        for entity, day, sources in result[
+            [entity_column, "date", "corporate_action_signal_sources"]
+        ].itertuples(index=False, name=None)
     }
     flags: list[bool] = []
     dates_values: list[list[str]] = []
     sources_values: list[list[str]] = []
     complete_values: list[bool] = []
-    for row in result[["ticker", "date"]].itertuples(index=False):
-        index = position.get(pd.Timestamp(row.date))
+    for entity, day in result[[entity_column, "date"]].itertuples(index=False, name=None):
+        index = position.get(pd.Timestamp(day))
         if index is None:
-            raise ValueError(f"date {row.date} is absent from the supplied BIST calendar")
+            raise ValueError(f"date {day} is absent from the supplied BIST calendar")
         future_dates = calendar[index + 1 : index + 1 + horizon_days]
         complete_values.append(len(future_dates) == horizon_days)
         signalled_dates = [
-            value for value in future_dates if action_lookup.get((str(row.ticker), value), False)
+            value for value in future_dates if action_lookup.get((str(entity), value), False)
         ]
         flags.append(bool(signalled_dates))
         dates_values.append([value.date().isoformat() for value in signalled_dates])
         sources = {
             source
             for value in signalled_dates
-            for source in source_lookup.get((str(row.ticker), value), [])
+            for source in source_lookup.get((str(entity), value), [])
         }
         sources_values.append(sorted(sources))
     result["corporate_action_window"] = flags
@@ -483,15 +500,34 @@ def evaluate_basic_entry_eligibility(
 
 def _calendar_grid(frame: pd.DataFrame, bist_calendar: Sequence[Any]) -> pd.DataFrame:
     calendar = pd.DatetimeIndex(pd.to_datetime(pd.Index(bist_calendar))).normalize().unique().sort_values()
-    tickers = sorted(map(str, frame["ticker"].dropna().unique()))
+    entity_column = _entity_column(frame)
+    entities = sorted(map(str, frame[entity_column].dropna().unique()))
     grid = pd.MultiIndex.from_product(
-        [tickers, calendar], names=["ticker", "date"]
+        [entities, calendar], names=[entity_column, "date"]
     ).to_frame(index=False)
     prepared = frame.copy()
     prepared["date"] = pd.to_datetime(prepared["date"]).dt.normalize()
-    if prepared.duplicated(["ticker", "date"]).any():
-        raise ValueError("daily cleaning input contains duplicate ticker/date rows")
-    return grid.merge(prepared, on=["ticker", "date"], how="left", validate="one_to_one")
+    if prepared.duplicated([entity_column, "date"]).any():
+        raise ValueError(
+            f"daily cleaning input contains duplicate {entity_column}/date rows"
+        )
+    result = grid.merge(
+        prepared,
+        on=[entity_column, "date"],
+        how="left",
+        validate="one_to_one",
+    )
+    if entity_column == "security_id":
+        for column in (
+            "current_ticker",
+            "ticker_mapping_version",
+            "ticker_mapping_checksum",
+        ):
+            if column in result:
+                result[column] = result.groupby(entity_column)[column].transform(
+                    lambda values: values.ffill().bfill()
+                )
+    return result
 
 
 def build_clean_eligibility_frame(
@@ -528,8 +564,9 @@ def build_clean_eligibility_frame(
         result, reason_priority=settings.reason_priority
     )
 
+    entity_column = _entity_column(result)
     valid_close = result["yf_nominal_close"].where(result["ohlc_quality_flag"].eq("VALID"))
-    result["previous_nominal_close"] = valid_close.groupby(result["ticker"]).transform(
+    result["previous_nominal_close"] = valid_close.groupby(result[entity_column]).transform(
         lambda values: values.shift(1).ffill()
     )
     raw_limits: list[float | None] = []
@@ -583,15 +620,15 @@ def build_clean_eligibility_frame(
     result["price_step_resolution_status"] = resolution_statuses
     result["official_source_document"] = source_documents
 
-    daily_lookup = result.set_index(["ticker", "date"], drop=False)
+    daily_lookup = result.set_index([entity_column, "date"], drop=False)
     output_rows: list[dict[str, Any]] = []
     last_prediction_position = len(calendar) - settings.corporate_action_horizon_days
-    for ticker in sorted(result["ticker"].unique()):
+    for entity in sorted(map(str, result[entity_column].unique())):
         for position in range(last_prediction_position):
             prediction_date = calendar[position]
             entry_date = calendar[position + 1]
-            prediction_row = daily_lookup.loc[(ticker, prediction_date)]
-            entry_row = daily_lookup.loc[(ticker, entry_date)]
+            prediction_row = daily_lookup.loc[(entity, prediction_date)]
+            entry_row = daily_lookup.loc[(entity, entry_date)]
             reasons = list(entry_row["entry_exclusion_reasons"])
             requires_review = bool(entry_row["requires_review"])
             previous_close = entry_row["previous_nominal_close"]
@@ -638,9 +675,15 @@ def build_clean_eligibility_frame(
                 eligible = pd.NA
             else:
                 eligible = True
-            output_rows.append(
-                {
-                    "ticker": ticker,
+            observed_ticker = entry_row.get("observed_ticker", entry_row.get("ticker"))
+            if pd.isna(observed_ticker):
+                observed_ticker = prediction_row.get(
+                    "observed_ticker", prediction_row.get("ticker")
+                )
+            if pd.isna(observed_ticker):
+                observed_ticker = entry_row.get("current_ticker", entity)
+            output_row = {
+                    "ticker": str(observed_ticker),
                     "trade_date": entry_date,
                     "prediction_date": prediction_date,
                     "entry_date": entry_date,
@@ -698,13 +741,38 @@ def build_clean_eligibility_frame(
                     ),
                     "requires_review": requires_review,
                 }
-            )
+            if entity_column == "security_id":
+                output_row.update(
+                    {
+                        "security_id": entity,
+                        "observed_ticker": entry_row.get("observed_ticker", pd.NA),
+                        "current_ticker": entry_row.get("current_ticker", pd.NA),
+                        "ticker_mapping_status": entry_row.get(
+                            "ticker_mapping_status", pd.NA
+                        ),
+                        "ticker_mapping_rule_id": entry_row.get(
+                            "ticker_mapping_rule_id", pd.NA
+                        ),
+                        "ticker_mapping_version": entry_row.get(
+                            "ticker_mapping_version", pd.NA
+                        ),
+                        "ticker_mapping_checksum": entry_row.get(
+                            "ticker_mapping_checksum", pd.NA
+                        ),
+                    }
+                )
+            output_rows.append(output_row)
     output = pd.DataFrame(output_rows)
     if not output.empty:
         output["entry_eligible"] = pd.Series(output["entry_eligible"], dtype="boolean")
         output["entry_exclusion_reason"] = output["entry_exclusion_reason"].astype("string")
         output["entry_exclusion_detail"] = output["entry_exclusion_detail"].astype("string")
-    return output.sort_values(["ticker", "prediction_date"]).reset_index(drop=True)
+    sort_columns = (
+        ["security_id", "prediction_date"]
+        if "security_id" in output.columns
+        else ["ticker", "prediction_date"]
+    )
+    return output.sort_values(sort_columns).reset_index(drop=True)
 
 
 def summarize_cleaning(frame: pd.DataFrame) -> dict[str, Any]:

@@ -99,6 +99,9 @@ class MarketDataConfig:
     tick_size_reference_path: Path = Path(
         "reference_data/bist_equity_tick_sizes_v1.csv"
     )
+    security_ticker_mapping_path: Path = Path(
+        "reference_data/bist_security_ticker_map_v1.csv"
+    )
     raw_directory_name: str = "raw"
     derived_directory_name: str = "derived"
     manifest_directory_name: str = "manifests"
