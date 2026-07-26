@@ -4,11 +4,11 @@
 
 ## Mevcut Aşama
 
-Kaynak kabul testinde tespit edilen hibrit fiyat ölçeği sorunu için tek fiyat kaynağı yaklaşımı kesinleştirildi.
+Değişmez ham veri snapshot sürümleme ve sağlayıcı revision tespiti altyapısı tamamlandı.
 
-İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. Tek kaynaklı kabul kodu, repo içi dayanıklı İş Yatırım istemcisi ve birim testleri tamamlandı.
+İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. İki kaynağın ham verileri birbirinden bağımsız `raw` snapshot'larda; yFinance nominal OHLC ise kaynak snapshot kimliğine bağlı ayrı `derived` katmanda saklanır. Canonical checksum, atomik yazma, manifest doğrulaması ve revision fark raporu eski snapshot'ların üzerine yazılmasını önler.
 
-`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul aşaması tamamlandı. Eğitim ve günlük tahmin bağımsız süreçler olarak kesinleştirildi; sıradaki veri toplama altyapısı değişmez veri snapshot'larının yanı sıra ilerideki model ve tahmin sürümlerinin kaynak bağlarını da desteklemelidir.
+`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul ve snapshot/revision altyapısı aşamaları tamamlandı. Sıradaki görev D022 ve D023 durum kodlarının modüler veri temizleme kodunda uygulanmasıdır.
 
 ## Tamamlananlar
 
@@ -114,6 +114,15 @@ Kaynak kabul testinde tespit edilen hibrit fiyat ölçeği sorunu için tek fiya
 - Model artifact'ı, metadata, sıralı feature şeması, config, veri snapshot/checksum bağları, kod commit SHA'sı ve metriklerin dosya tabanlı sürümlü kayıtta saklanması kesinleştirildi.
 - Tahmin feature isim, sayı veya sıra uyuşmazlığında sessiz devam edilmeyip açık hata üretilmesine karar verildi.
 - Veri toplama altyapısının değişmez ham veri ve sağlayıcı revizyon kaydına ek olarak model ile tahmin kayıtlarının kullandığı snapshot kimliklerini tekrarlanabilir biçimde sağlaması gerektiği belirlendi.
+- Veri kökleri, ham/türetilmiş katman yolları, manifest/revision yolları, model başlangıcı, ayrı warm-up ayarı, timeout/retry değerleri, checksum algoritması ve snapshot durumları merkezi `MarketDataConfig` yapısına alındı.
+- İş Yatırım'ın dayanıklı repo içi istemcisi ile yFinance `auto_adjust=False`, `actions=True` çağrısını kullanan ortak kolektör ve `scripts/collect_market_data.py` komutu oluşturuldu.
+- yFinance sağlayıcı OHLC, adet hacmi, temettü ve split alanları değişmeden `raw`; D024 nominal OHLC ve normalizasyon denetim alanları kaynak snapshot bağıyla ayrı `derived` katmana yazılır hale getirildi.
+- Snapshot içeriği kolon sırası, satır sırası, tarih, sayısal değer ve null gösterimi için canonical JSON Lines biçimine dönüştürülerek SHA-256 içerik ve şema checksum'larıyla kaydedilir hale getirildi.
+- Aynı mantıksal istekte aynı içerik için idempotent sonuç; değişen içerik için yeni revision, önceki snapshot bağı, değişen satır/hücre/sütun ve eklenen/kaldırılan tarih raporu üretildi.
+- Snapshot dizini ve JSONL manifestleri geçici dosya/dizin üzerinden atomik `replace` ile yazılır; yalnız manifestte bulunan ve fiziksel checksum doğrulamasından geçen `COMPLETE` snapshot'lar kullanılabilir kabul edilir.
+- `FAILED`, `PARTIAL` ve `CORRUPT` durumları eğitim için kullanılamaz olarak ayrıldı; başarısız veya kısmi sağlayıcı sonuçlarının hata bilgisiyle denetlenebilir kaydı desteklenir hale getirildi.
+- Snapshot kimlikleri, kaynak/checksum/config/kod SHA/provider sürümü ve `input_snapshot_ids` alanları D025'teki gelecekteki model ve tahmin metadata bağlarını destekleyecek biçimde kaydedildi.
+- Snapshot/revision/izolasyon/atomik hata senaryoları ile sahte sağlayıcılı kolektör testleri eklendi; toplam 60 birim test ve mevcut gerçek kaynak kabul koşusu `PASS` tamamlandı.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -155,10 +164,9 @@ Kaynak kabul testinde tespit edilen hibrit fiyat ölçeği sorunu için tek fiya
 
 ## Sıradaki Görevler
 
-1. Veri toplama, değişmez ham veri sürümleme ve sağlayıcı revizyon tespiti altyapısını oluştur.
-2. D022 ve D023 durum kodlarını modüler veri temizleme kodunda uygula.
-3. Kod değiştiren hisselerin eşlemesini test et.
-4. Label üretim koduna geç.
+1. D022 ve D023 durum kodlarını modüler veri temizleme kodunda uygula.
+2. Kod değiştiren hisselerin eşlemesini test et.
+3. Label üretim koduna geç.
 
 ## Sonraki Ana Aşamalar
 

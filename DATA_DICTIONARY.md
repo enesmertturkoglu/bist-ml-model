@@ -8,6 +8,78 @@
 
 Bu sözlük yalnız kaynak kabul testinde gerçekten gözlenen sütunları ve kaynak ölçeği testinde bunlardan üretilen açık kalite alanlarını içerir. `T+1–T+3` işlem yapılabilirlik, kurumsal işlem ve gelecekteki split faktörü model feature'ı değildir. Tarihsel düzeltilmiş değerler ve yFinance action geçmişi bugünkü sorguda gelecekteki düzeltmeleri içerebildiği için point-in-time feature olarak kullanılamaz.
 
+## Veri Snapshot Katmanları
+
+Varsayılan dosya tabanlı yapı aşağıdaki katmanları kullanır:
+
+```text
+data/
+├── raw/<source>/<dataset_type>/<instrument>/<logical_key>/.../data.jsonl
+├── derived/<source>/<dataset_type>/<instrument>/<logical_key>/.../data.jsonl
+└── manifests/
+    ├── snapshots.jsonl
+    └── provider_revisions.jsonl
+```
+
+- `raw`: Sağlayıcı alanları ve değerleri değiştirilmeden saklanır. yFinance tarih indeksi yalnız serializasyon için yerel `date` sütununa taşınır ve istek tickera `ticker` kimliği eklenir. İş Yatırım'ın kabul edilmiş yardımcı alanları aynı ham frame içinde korunur.
+- `derived`: Ham veriyle karışmayan dönüşüm çıktılarıdır. İlk oluşturulan dataset `yfinance/nominal_ohlc` olup D024 nominal OHLC ve split-normalizasyon denetim alanlarını içerir; kaynak ham snapshot `input_snapshot_ids` ile bağlanır.
+- `manifests`: Commit edilmiş snapshot kayıtları ile gerçek sağlayıcı revision farklarını tutar. Geçici `.snapshot-tmp-*` dosya veya dizinleri manifest kaydı olmadan geçerli snapshot sayılmaz.
+
+Snapshot verileri ek bir Parquet bağımlılığı gerektirmeyen `canonical-jsonl-v1` biçiminde saklanır. Checksum öncesinde sütun ve satır sırası, tarih, sayısal değer ve null gösterimi deterministik hale getirilir. Varsayılan algoritma `sha256`dır. Fiziksel veri ve metadata önce aynı dosya sisteminde geçici dizine yazılır, ardından atomik olarak son değişmez dizinine taşınır; manifest atomik olarak son commit sınırıdır.
+
+## Snapshot ve Manifest Metadata Alanları
+
+| Alan | Veri tipi | Anlamı ve doğrulama kuralı |
+| --- | --- | --- |
+| `snapshot_id` | `string` | Mantıksal dataset anahtarı, revision numarası, içerik ve şema checksum'ından yeniden üretilebilen kararlı kimlik |
+| `source` | `string` | `yfinance` veya `isyatirim`; kaynak revision zincirleri birbirinden bağımsızdır |
+| `dataset_type` | `string` | Örneğin `equity_history` veya `nominal_ohlc` |
+| `ticker_or_instrument` | `string` | İstek kapsamındaki ticker/endeks/enstrüman kimliği; ayrı mantıksal zincir oluşturur |
+| `request_start_date` | ISO `date` | İstek döneminin kapsayıcı başlangıcı; dönem izolasyonunun parçasıdır |
+| `request_end_date` | ISO `date` | İstek döneminin kapsayıcı bitişi; yFinance hariç bitiş çağrısında bir gün ileri taşınır |
+| `fetch_timestamp_utc` | UTC ISO `datetime` | Snapshot denemesinin UTC üretim zamanı |
+| `row_count` | `integer` | Canonical veri satırı sayısı; fiziksel JSONL satır sayısıyla doğrulanır |
+| `column_names` | `array[string]` | Deterministik sıralı sütun listesi |
+| `column_types` | `object` | Sütun başına canonical semantik tip (`date`, `datetime`, `number`, `integer`, `boolean`, `string`, `null`, vb.) |
+| `content_checksum` | hex `string` | Canonical JSONL içeriğinin checksum'ı; idempotency ve provider revision tespiti için kullanılır |
+| `schema_checksum` | hex `string` | Sıralı sütun adları ve canonical tiplerin checksum'ı |
+| `file_path` | POSIX bağıl `string` | `data_root` altındaki fiziksel `data.jsonl`; kök dışına çıkmasına izin verilmez |
+| `revision_number` | `integer` | Aynı mantıksal dataset içindeki artan sıra numarası |
+| `previous_snapshot_id` | `string/null` | Önceki fiziksel olarak doğrulanmış `COMPLETE` snapshot kimliği |
+| `request_parameters` | `object` | `auto_adjust`, `actions`, endpoint, kapsayıcı bitiş ve dönüşüm sürümü gibi sonucu etkileyen istek parametreleri |
+| `config_checksum` | hex `string` | Etkin merkezi `MarketDataConfig` değerlerinin checksum'ı |
+| `code_commit_sha` | `string` | Snapshot'ı üreten repo commit SHA'sı; alınamazsa açıkça `unknown` |
+| `provider_library_version` | `string` | `yfinance` veya `isyatirimhisse` paket sürümü |
+| `snapshot_status` | enum `string` | `COMPLETE`, `FAILED`, `PARTIAL` veya `CORRUPT`; yalnız fiziksel doğrulamadan geçen `COMPLETE` kayıt kullanılabilir |
+| `logical_dataset_key` | hex `string` | Katman, kaynak, dataset türü, instrument, dönem ve istek parametrelerinin deterministik anahtarı |
+| `layer` | enum `string` | `raw` veya `derived`; iki katman aynı dizinde saklanmaz |
+| `checksum_algorithm` | `string` | İçerik, şema, config ve kimlik doğrulamasında kullanılan algoritma; varsayılan `sha256` |
+| `storage_format` | `string` | İlk sürümde `canonical-jsonl-v1` |
+| `snapshot_schema_version` | `string` | Snapshot metadata şema sürümü; ilk sürümde `v1` |
+| `input_snapshot_ids` | `array[string]` | Türetilmiş snapshot'ın kaynak aldığı değişmez snapshot kimlikleri |
+| `identity_columns` | `array[string]` | Revision satır karşılaştırmasında kullanılan ticker/tarih anahtarları |
+| `error_message` | `string/null` | `FAILED` veya `PARTIAL` sağlayıcı denemesinin açık hata bilgisi |
+| `revision` | `object/null` | Önceki `COMPLETE` snapshot'a göre provider revision fark özeti |
+
+`FAILED`, `PARTIAL` ve `CORRUPT` kayıtlar manifestte denetim amacıyla bulunabilir; eğitim, feature, label, backtest veya günlük tahmin için kullanılabilir kabul edilmez. Bir `COMPLETE` kaydın da kullanılmadan önce metadata dosyası, fiziksel dosya, satır sayısı, içerik checksum'ı, şema checksum'ı ve yeniden üretilen `snapshot_id` ile doğrulanması gerekir.
+
+## Provider Revision Alanları
+
+| Alan | Veri tipi | Anlamı |
+| --- | --- | --- |
+| `revision_id` | `string` | Revision fark özetinin deterministik kimliği |
+| `logical_dataset_key` | `string` | Değişikliğin ait olduğu izole kaynak/ticker/dönem/istek zinciri |
+| `previous_snapshot_id` | `string` | Karşılaştırılan önceki geçerli snapshot |
+| `snapshot_id` | `string` | Değişen içerikle oluşturulan yeni snapshot |
+| `detected_at_utc` | UTC ISO `datetime` | Sağlayıcı değişikliğinin tespit zamanı |
+| `changed_row_count` | `integer` | Aynı kimlik anahtarında en az bir hücresi değişen satır sayısı |
+| `added_dates` | `array[date]` | Yeni içerikte eklenen benzersiz tarihler |
+| `removed_dates` | `array[date]` | Yeni içerikten kaldırılan benzersiz tarihler |
+| `changed_columns` | `array[string]` | Değişen hücre veya şema nedeniyle etkilenen sütunlar |
+| `changed_cell_count` | `integer` | Aynı kimlikli satırlarda değeri değişen hücre sayısı |
+
+İçerik ve şema checksum'ları aynıysa yeni revision veya yeni dosya oluşturulmaz; mevcut snapshot kimliği idempotent olarak döner. İçerik ya da şema değişirse eski revision korunur, yeni fiziksel dizin oluşturulur ve zincir `previous_snapshot_id` ile bağlanır.
+
 ## İş Yatırım / `isyatirimhisse`
 
 | Alan adı | Kaynak sütun adı | Veri tipi | Ham/düzeltilmiş | Anlamı | Tahmin anında kullanılabilirlik | Label/backtest kullanım amacı | Eksik değer davranışı | Veri kalite kontrolü |
