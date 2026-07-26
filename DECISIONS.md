@@ -596,6 +596,62 @@ Veri toplama, fiyat normalizasyonu, tavan hesabı, işlem yapılabilirlik, label
 **Tarih:**
 2026-07-26
 
+### D025 — Model Eğitimi ve Günlük Tahmin Süreçlerinin Ayrılması
+
+**Karar:**
+İlk sürümde model eğitimi ile günlük tahmin üretimi birbirinden bağımsız iki süreç olacaktır.
+
+Eğitim süreci kullanıcı tarafından açık bir eğitim komutuyla çalıştırılacaktır. Her eğitimde:
+
+- Yalnız belirtilen `as_of_date` tarihinde mevcut olan veriler kullanılacaktır.
+- Üç işlem günlük label penceresi tamamen sonuçlanmış kayıtlar eğitime alınacaktır.
+- LightGBM modeli sıfırdan eğitilecektir.
+- Incremental learning kullanılmayacaktır.
+- Yeni ve değişmez bir model sürümü oluşturulacaktır; eski model sürümleri silinmeyecek veya sessizce üzerine yazılmayacaktır.
+- Model dosyası, metadata, sıralı feature listesi, config snapshot'ı ve eğitim/doğrulama metrikleri birlikte saklanacaktır.
+
+Tahmin süreci, seçilen işlem günü için daha önce eğitilmiş bir model sürümünü kullanacaktır. Tahmin sırasında:
+
+- Tahmin tarihinde mevcut en güncel veri ve feature'lar kullanılacaktır.
+- Model yeniden eğitilmeyecektir.
+- Kullanıcı belirli bir model sürümünü seçebilecek veya aktif model sürümünü kullanabilecektir.
+- Hisseler LightGBM pozitif sınıf olasılığına göre sıralanacaktır.
+- `as_of_date`, `model_version`, kullanılan veri snapshot kimlikleri ve tahmin üretim zamanı sonuçla birlikte kaydedilecektir.
+
+Her model sürümünde en az aşağıdaki bilgiler tutulacaktır:
+
+```text
+model_version
+training_timestamp
+training_start_date
+training_end_date
+latest_available_label_date
+data_snapshot_ids
+data_snapshot_checksums
+feature_names_in_order
+lightgbm_parameters
+random_seed
+label_decision_version
+code_commit_sha
+training_row_count
+positive_class_rate
+training_metrics
+validation_metrics
+```
+
+Tahmin sırasında üretilen feature isimleri, sayısı ve sırası model metadata'sıyla tam eşleşmelidir. Herhangi bir uyuşmazlıkta sessizce tahmin yapılmayacak ve açık hata üretilecektir.
+
+İlk sürümde MLflow veya benzeri ek bir model yönetim sistemi kullanılmayacaktır. Model kayıtları sade, dosya tabanlı, sürümlü ve değişmez bir yapıda tutulacaktır.
+
+**Gerekçe:**
+Eğitimi günlük tahminden ayırmak, aynı model sürümüyle tekrarlanabilir tahmin üretmeyi; model, veri ve kod sürümleri arasındaki bağı denetlenebilir biçimde kaydetmeyi sağlar. Label penceresi tamamlanmamış kayıtların eğitime alınmaması veri sızıntısını önler. Değişmez model sürümleri ise yeni eğitimin geçmiş sonuçları sessizce değiştirmesini engeller.
+
+**Etkilenen alanlar:**
+Veri snapshot ve checksum yapısı, merkezi config, label uygunluğu, feature şeması, LightGBM eğitimi, model kayıt yapısı, günlük tahmin, sonuç raporlama ve tekrarlanabilirlik.
+
+**Tarih:**
+2026-07-26
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

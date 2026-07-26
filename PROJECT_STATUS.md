@@ -8,7 +8,7 @@ Kaynak kabul testinde tespit edilen hibrit fiyat ölçeği sorunu için tek fiya
 
 İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. Tek kaynaklı kabul kodu, repo içi dayanıklı İş Yatırım istemcisi ve birim testleri tamamlandı.
 
-`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul aşaması tamamlandı; sıradaki görev veri toplama ve temizleme altyapısıdır.
+`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul aşaması tamamlandı. Eğitim ve günlük tahmin bağımsız süreçler olarak kesinleştirildi; sıradaki veri toplama altyapısı değişmez veri snapshot'larının yanı sıra ilerideki model ve tahmin sürümlerinin kaynak bağlarını da desteklemelidir.
 
 ## Tamamlananlar
 
@@ -107,6 +107,13 @@ Kaynak kabul testinde tespit edilen hibrit fiyat ölçeği sorunu için tek fiya
 - Tüm test dönemlerinde 7 eksik nominal OHLC satırı açık durumlarla dışlanabilir bulundu; 14.386 çapraz kaynak fiyat farkı yalnız kalite uyarısı olarak raporlandı ve kabul sonucunu etkilemedi.
 - D022 uygulanabilir bulundu; açılış mevcutken iki hacmin birlikte eksik olduğu kayıt sayısı `0` kaldı. D023 uygulanabilir bulundu ve 213 tahmin satırı `CORPORATE_ACTION_WINDOW` ile işaretlenebilir ölçüldü.
 - Dayanıklı tek fiyat kaynaklı kabul sonucu `PASS` oldu ve kaynak kabul aşaması tamamlandı.
+- Model eğitimi ile günlük tahmin üretiminin bağımsız süreçler olmasına karar verildi.
+- Eğitimin açık komutla, belirtilen `as_of_date` tarihindeki veriler ve yalnız tamamen sonuçlanmış üç işlem günlük label pencereleriyle çalıştırılması kesinleştirildi.
+- Her eğitimde LightGBM'in sıfırdan eğitilmesi, incremental learning kullanılmaması ve eski sürümlerin üzerine yazılmadan değişmez model sürümü üretilmesi kararlaştırıldı.
+- Tahmin sırasında modelin yeniden eğitilmemesi; seçilen veya aktif model sürümüyle en güncel kullanılabilir feature'ların değerlendirilmesi kararlaştırıldı.
+- Model artifact'ı, metadata, sıralı feature şeması, config, veri snapshot/checksum bağları, kod commit SHA'sı ve metriklerin dosya tabanlı sürümlü kayıtta saklanması kesinleştirildi.
+- Tahmin feature isim, sayı veya sıra uyuşmazlığında sessiz devam edilmeyip açık hata üretilmesine karar verildi.
+- Veri toplama altyapısının değişmez ham veri ve sağlayıcı revizyon kaydına ek olarak model ile tahmin kayıtlarının kullandığı snapshot kimliklerini tekrarlanabilir biçimde sağlaması gerektiği belirlendi.
 
 ## Kesinleşen Başlangıç Senaryosu
 

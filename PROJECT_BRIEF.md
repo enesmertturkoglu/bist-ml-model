@@ -75,6 +75,17 @@ Temel metrikler:
 - Net getiri
 - Maximum drawdown
 
+## Çalışma Akışı
+
+İlk sürümün operasyonel akışı birbirinden ayrılmış ve sürümlü dört adımdan oluşacaktır:
+
+1. Günlük veri güncellemesi, sağlayıcı verilerini değişmez ve checksum ile doğrulanabilir snapshot'lar halinde kaydeder.
+2. Bağımsız model eğitimi yalnız kullanıcı tarafından açıkça çalıştırılır; belirtilen `as_of_date` tarihindeki tamamlanmış label'ları kullanarak LightGBM'i sıfırdan eğitir ve yeni bir model sürümü oluşturur.
+3. Günlük tahmin, yeniden eğitim yapmadan kullanıcının seçtiği veya aktif model sürümüyle tahmin tarihindeki en güncel kullanılabilir feature'ları değerlendirir ve hisseleri pozitif sınıf olasılığına göre sıralar.
+4. Tahmin sonucu; `as_of_date`, model sürümü, veri snapshot kimlikleri ve üretim zamanı ile sürümlü olarak kaydedilir.
+
+Model ve tahmin kayıtları ilk sürümde MLflow gibi ek bir sistem yerine sade, dosya tabanlı ve değişmez artifact yapısıyla yönetilecektir.
+
 ## Mevcut Aşama
 
 Ana model dönemi `2020-03-13` tarihinde başlar. Standart normal adi paylarda tavan açılış `%10` marj ve içeri doğru fiyat adımı yuvarlamasıyla hesaplanır; baz fiyat ve açılış karşılaştırması yFinance nominal OHLC serisinden alınır.
