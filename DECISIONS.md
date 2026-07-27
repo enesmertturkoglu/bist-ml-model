@@ -726,6 +726,49 @@ Aktif ticker evreni, provider sorgu planı, nominal security birleştirmesi, cle
 **Tarih:**
 2026-07-27
 
+### D028 — baseline_v1 Feature Kataloğu ve Leakage Sözleşmesi
+
+**Karar:**
+
+`baseline_v1`, aşağıdaki gruplara dağılan tam 32 model feature'ından oluşacaktır:
+
+- 6 fiyat getirisi ve momentum
+- 4 trend ve fiyat konumu
+- 5 volatilite ve fiyat aralığı
+- 5 hacim ve likidite
+- 3 mum/gün içi yapı
+- 1 sınırlı teknik gösterge (`rsi_14_sma`)
+- 4 piyasa/endeks ve relatif güç
+- 4 kesitsel rank
+
+Feature satırının tekil anahtarı `security_id + prediction_date` olacaktır. `security_id`, zorunlu kimlik ve rolling anahtarıdır; model feature'ı değildir. Feature girdisinde `security_id` bulunmuyorsa ticker tabanlı fallback yapılmayacak ve girdi açık hatayla reddedilecektir. Rolling hesaplar yalnız `security_id` içinde izole edilecektir.
+
+Tahmin `T` seansı kapandıktan sonra üretildiği için T gününün tamamlanmış günlük verileri feature hesaplarına dahil edilebilir; `T+1` ve sonrasındaki fiyat, hacim, işlem uygunluğu, action ve label alanları yasaktır. Rolling pencereler global İş Yatırım BİST işlem takvimindeki ardışık oturumlara göre kurulacaktır. Eksik security oturumları son mevcut satırlara doğru sıkıştırılmayacak, forward-fill/back-fill veya sentetik satırla doldurulmayacaktır.
+
+Fiyat feature'ları yalnız ölçekten bağımsız formüllerle `yf_provider_open`, `yf_provider_high`, `yf_provider_low` ve `yf_provider_close` alanlarından üretilecektir. Mutlak provider fiyat seviyesi model feature'ı değildir. `yf_nominal_*` alanları yalnız giriş, label, çıkış ve tavan işlemlerinde kalacak; `yf_future_split_factor`, split/action alanları ve bunların tarihleri modele girmeyecektir. Provider ve nominal OHLC aynı feature formülünde karıştırılmayacaktır.
+
+Baseline hacim kaynağı İş Yatırım `is_tl_volume` alanıdır. Farklı birimdeki `yf_share_volume` baseline model feature'ı değildir. Eksik değer imputasyonu, tüm dönem standardizasyonu ve winsorization baseline feature üretiminde yapılmayacaktır.
+
+Piyasa ve relatif güç feature'ları yalnız ayrı, sürümlü, fiziksel olarak doğrulanmış ve aynı `prediction_date` oturumuyla birebir eşleşen XU100/BIST 100 kapanış snapshot'ından üretilecektir. Bu bağımlılık hazır değilse sessiz fallback yapılmayacak ve pipeline açık hata verecektir.
+
+Kesitsel feature'lar yalnız aynı `prediction_date` içinde, label veya T+1 işlem uygunluğu bağlantısından önce hesaplanacaktır. Rank tie yöntemi `average`, asgari geçerli security sayısı `MIN_CS_SECURITIES = 20` olacaktır. `entry_eligible`, `requires_review`, `target_hit`, `label` ve diğer gelecek-sonuç alanları rank evrenini belirleyemez.
+
+Tarih-etkin sektör ve turnover adayları gerekli point-in-time veriler doğrulanana kadar `DEFER`; beta, idiosyncratic return, downside volatility ve breakout adayları `EXPERIMENT_LATER` durumundadır. Elle etkileşim feature'ları, isimlendirilmiş mum deseni ailesi, ek osilatör ailesi ve tavan yakınlığı `REJECT` durumundadır. `feature_fraction` bir feature kararı değildir ve feature grubu deneylerinden sonraki LightGBM parametre optimizasyonu aşamasına ertelenmiştir.
+
+Tam feature listesi, formüller, kaynak sütunları, minimum geçmiş, missing/warm-up davranışı, canlı üretilebilirlik, aday durumları, kontrollü ablation sırası ve snapshot kabul kriterleri `FEATURE_CATALOG.md` içinde bağlayıcı olarak tanımlanmıştır.
+
+**Gerekçe:**
+
+Sınırlı ve açık bir baseline; model karmaşıklığını kontrol eder, her feature'ın canlı sistemde aynı hesapla yeniden üretilebilmesini sağlar ve feature gruplarının katkısını kontrollü ablation ile ölçmeyi mümkün kılar. Ölçekten bağımsız provider OHLC formülleri split sonrası sağlayıcı yeniden ölçeklemesinden sinyal türetilmesini engeller. Global BİST takvimi, zorunlu `security_id`, T+1 denylist'i, tarih-içi kesitsel hesaplama ve doğrulanmış snapshot koşulları zaman sızıntısı ile kimlik karışması riskini sınırlar.
+
+**Etkilenen alanlar:**
+
+Feature engineering, snapshot şeması, veri sızıntısı testleri, walk-forward deney tasarımı, model feature şeması ve günlük tahmin.
+
+**Tarih:**
+
+2026-07-27
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

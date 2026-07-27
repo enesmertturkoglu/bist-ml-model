@@ -4,11 +4,11 @@
 
 ## Mevcut Aşama
 
-D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiyat adımı, üç BİST işlem günlük label üretimi ve D027 sade security kimliği/tarih-etkin ticker mapping altyapısı tamamlandı.
+D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiyat adımı, üç BİST işlem günlük label üretimi, D027 sade security kimliği/tarih-etkin ticker mapping altyapısı ve D028 `baseline_v1` feature kataloğu/leakage sözleşmesi tamamlandı.
 
 İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. İki kaynağın ham verileri birbirinden bağımsız `raw` snapshot'larda; yFinance nominal OHLC ise kaynak snapshot kimliğine bağlı ayrı `derived` katmanda saklanır. Canonical checksum, atomik yazma, manifest doğrulaması ve revision fark raporu eski snapshot'ların üzerine yazılmasını önler.
 
-`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul, snapshot/revision, temizleme, fiyat adımı, label ve security identity üretimi tamamlandı. Mapping bulunmayan ticker yeni security olarak kesintisiz işlenir; mapping güncel değilken kod değişikliği tarihsel seriyi geçici olarak bölebilir. Sıradaki görev feature kullanılabilirlik kurallarını ve feature kataloğunu hazırlamaktır.
+`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul, snapshot/revision, temizleme, fiyat adımı, label ve security identity üretimi tamamlandı. Mapping bulunmayan ticker yeni security olarak kesintisiz işlenir; mapping güncel değilken kod değişikliği tarihsel seriyi geçici olarak bölebilir. Feature araştırması, 32 feature'lık `baseline_v1` kataloğu ve veri sızıntısı sözleşmesi kesinleşti; henüz feature kodu veya deney sonucu üretilmedi. Sıradaki aşama XU100 snapshot bağımlılığını netleştirmek ve belgeye uygun modüler feature pipeline tasarımını/uygulamasını hazırlamaktır.
 
 ## Tamamlananlar
 
@@ -147,6 +147,8 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Kısa Türkçe işletim belgesi `SECURITY_MAPPING_AND_TRAINING_DATA.md` eklendi.
 - Resolver, geçerlilik/çakışma, otomatik ID, provider dönem planı, mükerrer önceliği, snapshot checksum/revision/idempotence ve eski-yeni dönemin clean/label boyunca tek security kalmasını kapsayan 24 identity testi eklendi; tüm regresyon paketi 219 testle geçti.
 - Gerçek THYAO nominal snapshot'ı `snap_86bf32995854f483_r0001_e3137169a75f`, `224a718` kod commit'i ve boş doğrulanmış mapping v1 ile işlendi. `2024-01-02`–`2024-01-12` arasındaki 9 satır `SEC_444a261b8b9b` altında, `observed_ticker=THYAO` ve `AUTO_NEW_TICKER=9` dağılımıyla `COMPLETE` `snap_8ff782f3b81f315b_r0001_deceac87a850` snapshot'ına yazıldı. İçerik checksum'u `5529de13f8864d4b82e66b6ba114ebbd6281b82c479c85407b62529928d7a3e9`, mapping checksum'u `400935abc55b923b36004ee8407972fbd69dd39d59f95a970ad7577158d46819` olarak doğrulandı; ikinci koşu aynı snapshot'ı `created=false` döndürdü.
+- Feature araştırması tamamlandı; fiyat/momentum, trend, volatilite, hacim/likidite, gün içi yapı, RSI, XU100 relatif güç ve kesitsel rank gruplarına dağılan tam 32 feature'lık `baseline_v1` kataloğu kesinleştirildi.
+- `security_id` zorunluluğu, global BİST oturum pencereleri, provider/nominal OHLC ayrımı, T+1 ve label alanları denylist'i, XU100 snapshot ön koşulu ve label/entry filtresi öncesi kesitsel rank kurallarını içeren leakage sözleşmesi D028 ve `FEATURE_CATALOG.md` ile belgelendi. Feature pipeline kodu ve model deneyi henüz oluşturulmadı.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -190,7 +192,11 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Görevler
 
-1. Feature engineering için tahmin anındaki kullanılabilirlik kurallarını ve `FEATURE_CATALOG.md` içeriğini hazırla.
+1. Sürümlü ve doğrulanmış XU100 snapshot bağımlılığını netleştir veya uygula.
+2. Belgeye uygun modüler feature pipeline tasarımını hazırla.
+3. Feature snapshot şeması, merkezi config ve leakage testlerini uygula.
+4. Küçük gerçek veri koşusunda 32 feature kapsamını ve warm-up dağılımını doğrula.
+5. Daha sonra LightGBM eğitim ve walk-forward aşamasına geç.
 
 ## Sonraki Ana Aşamalar
 
@@ -206,6 +212,7 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Açık Sorular
 
+- Günlük tahmin tarihinde T verisi geçersiz veya işlem kanıtı bulunmayan securities için prediction universe kuralı nasıl belirlenecek? Bu kural T+1 `entry_eligible` alanına dayanamaz.
 - Likidite filtresi nasıl belirlenecek?
 - Günlük kaç hisse seçilecek?
 - Komisyon ve slippage varsayımları ne olacak?
