@@ -4,11 +4,11 @@
 
 ## Mevcut Aşama
 
-D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiyat adımı, üç BİST işlem günlük label üretimi, D027 sade security kimliği/tarih-etkin ticker mapping altyapısı ve D028 `baseline_v1` feature kataloğu/leakage sözleşmesi tamamlandı.
+D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiyat adımı, üç BİST işlem günlük label üretimi, D027 sade security kimliği/tarih-etkin ticker mapping altyapısı, D028 `baseline_v1` feature kataloğu/leakage sözleşmesi ve D029 güvenli XU100/global takvim/feature pipeline tamamlandı.
 
 İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. İki kaynağın ham verileri birbirinden bağımsız `raw` snapshot'larda; yFinance nominal OHLC ise kaynak snapshot kimliğine bağlı ayrı `derived` katmanda saklanır. Canonical checksum, atomik yazma, manifest doğrulaması ve revision fark raporu eski snapshot'ların üzerine yazılmasını önler.
 
-`2026-07-26` dayanıklı gerçek veri kabul koşusu 10 hissenin gerekli İş Yatırım ve yFinance verilerini eksiksiz alarak `PASS` üretti. yFinance nominal OHLC iç tutarlılığı değerlendirilebilir satırlarda `%100`, geçersiz nominal OHLC sayısı `0` oldu. Kaynak kabul, snapshot/revision, temizleme, fiyat adımı, label ve security identity üretimi tamamlandı. Mapping bulunmayan ticker yeni security olarak kesintisiz işlenir; mapping güncel değilken kod değişikliği tarihsel seriyi geçici olarak bölebilir. Feature araştırması, 32 feature'lık `baseline_v1` kataloğu ve veri sızıntısı sözleşmesi kesinleşti; henüz feature kodu veya deney sonucu üretilmedi. Sıradaki aşama XU100 snapshot bağımlılığını netleştirmek ve belgeye uygun modüler feature pipeline tasarımını/uygulamasını hazırlamaktır.
+`2026-07-27` gerçek feature kabul koşusu `2024-01-02`–`2024-02-23` döneminde 20 hisse ve 39 global seansla `PASS` tamamlandı. 780 tekil `security_id + prediction_date` satırında tam 32 feature üretildi; duplicate key ve sonsuz değer sayısı `0`, son seansta geçerli feature oranı `%100` oldu. Toplam missing oranı doğal 20 oturumluk warm-up dahil `%25.9615` ölçüldü. XU100 İstanbul çözümü 39/39 global seans ve `%100` yerel gece yarısı eşleşmesi verdi; UTC takvim adayı 31/39'da kaldı. END_* 20 hissede aynı gün değer/seans tutarlılığını `%100`, yFinance `XU100.IS` ise 39/39 gün overlap'i doğruladı; ikisi de fallback olarak kullanılmadı. Sıradaki aşama sabit feature snapshot şemasıyla LightGBM eğitim ve walk-forward deney altyapısıdır.
 
 ## Tamamlananlar
 
@@ -149,6 +149,13 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Gerçek THYAO nominal snapshot'ı `snap_86bf32995854f483_r0001_e3137169a75f`, `224a718` kod commit'i ve boş doğrulanmış mapping v1 ile işlendi. `2024-01-02`–`2024-01-12` arasındaki 9 satır `SEC_444a261b8b9b` altında, `observed_ticker=THYAO` ve `AUTO_NEW_TICKER=9` dağılımıyla `COMPLETE` `snap_8ff782f3b81f315b_r0001_deceac87a850` snapshot'ına yazıldı. İçerik checksum'u `5529de13f8864d4b82e66b6ba114ebbd6281b82c479c85407b62529928d7a3e9`, mapping checksum'u `400935abc55b923b36004ee8407972fbd69dd39d59f95a970ad7577158d46819` olarak doğrulandı; ikinci koşu aynı snapshot'ı `created=false` döndürdü.
 - Feature araştırması tamamlandı; fiyat/momentum, trend, volatilite, hacim/likidite, gün içi yapı, RSI, XU100 relatif güç ve kesitsel rank gruplarına dağılan tam 32 feature'lık `baseline_v1` kataloğu kesinleştirildi.
 - `security_id` zorunluluğu, global BİST oturum pencereleri, provider/nominal OHLC ayrımı, T+1 ve label alanları denylist'i, XU100 snapshot ön koşulu ve label/entry filtresi öncesi kesitsel rank kurallarını içeren leakage sözleşmesi D028 ve `FEATURE_CATALOG.md` ile belgelendi. Feature pipeline kodu ve model deneyi henüz oluşturulmadı.
+- D029 ile bağımsız İş Yatırım `IndexHistoricalAll` XU100 istemcisi, UTC-aware → `Europe/Istanbul` tarih çözümü ve global seans doğrulaması uygulandı. Raw epoch/value korunur; sabit `+1 gün`, END_* ve yFinance fallback olarak kullanılmaz.
+- Global BİST takvimi yalnız doğrulanmış İş Yatırım hisse oturumlarının birleşiminden üretilir. Eksik security günleri rolling grid'de korunur; sentetik hafta içi, forward-fill/back-fill ve son mevcut satıra sıkıştırma yoktur.
+- D028'deki tam 32 feature modüler `src/features` pipeline'ında uygulandı. Provider OHLC, İş Yatırım TL hacmi, tarih-etkin security identity ve validated XU100 yalnız allowlist ile birleştirilir; nominal/action/label/T+1 alanları fail-closed denylist ile engellenir.
+- Snapshot kimliği `revision_context_checksum` ile input/XU100/takvim/mapping/katalog/config/kod SHA provenansına bağlandı. Aynı içerik+bağlam idempotent, değişen bağlam aynı feature değerlerinde dahi yeni revision üretir.
+- Windows'ta yeni fsync edilmiş snapshot dizinini kısa süre tutan scanner/indexer kilitleri için atomik `replace` yalnız `PermissionError` durumunda sınırlı retry yapar. Sayısal provider epoch alanları adlarına bakılarak tarihe çevrilmez ve ham integer olarak korunur.
+- XU100, takvim, 32 formül, exact-session gap, tam warm-up, ölçek invariance, RSI uçları, kesitsel tie/minimum, denylist, identity zorunluluğu, snapshot lineage/idempotence/revision ve atomik Windows yazımı testleri eklendi. Bütün regresyon paketi `255 passed` verdi.
+- Gerçek 20-hisse/39-seans feature paneli izole `data/feature_acceptance` kökünde `PASS` tamamlandı: feature snapshot `snap_e3683df176da46de_r0002_87cc72905794`, validated XU100 `snap_14c275baa535b404_r0002_a8c6a1b90a70`, global takvim `snap_e42ff764cc64d9b3_r0002_ad73402528fa`.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -192,11 +199,10 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Görevler
 
-1. Sürümlü ve doğrulanmış XU100 snapshot bağımlılığını netleştir veya uygula.
-2. Belgeye uygun modüler feature pipeline tasarımını hazırla.
-3. Feature snapshot şeması, merkezi config ve leakage testlerini uygula.
-4. Küçük gerçek veri koşusunda 32 feature kapsamını ve warm-up dağılımını doğrula.
-5. Daha sonra LightGBM eğitim ve walk-forward aşamasına geç.
+1. `baseline_v1` snapshot şemasını kullanan yalnız LightGBM Classifier eğitim pipeline'ını uygula.
+2. D005'e uygun walk-forward split ve aynı tarihteki hisseleri birlikte tutan fold üretimini uygula.
+3. Model artifact/metadata kaydını D025'e göre feature snapshot ID/checksum ve sıralı feature şemasına bağla.
+4. İlk gerçek walk-forward tarihini kesinleştir ve deneyi `EXPERIMENT_LOG.md` içinde kaydet.
 
 ## Sonraki Ana Aşamalar
 

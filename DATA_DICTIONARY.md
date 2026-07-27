@@ -31,8 +31,8 @@ Snapshot verileri ek bir Parquet bağımlılığı gerektirmeyen `canonical-json
 
 | Alan | Veri tipi | Anlamı ve doğrulama kuralı |
 | --- | --- | --- |
-| `snapshot_id` | `string` | Mantıksal dataset anahtarı, revision numarası, içerik ve şema checksum'ından yeniden üretilebilen kararlı kimlik |
-| `source` | `string` | `yfinance`, `isyatirim`, `security_identity`, `cleaning` veya `labels`; kaynak revision zincirleri birbirinden bağımsızdır |
+| `snapshot_id` | `string` | Mantıksal dataset anahtarı, revision numarası, içerik/şema ve varsa revision context checksum'ından yeniden üretilebilen kararlı kimlik |
+| `source` | `string` | Örneğin `yfinance`, `isyatirim`, `benchmark`, `features`, `security_identity`, `cleaning` veya `labels`; kaynak revision zincirleri birbirinden bağımsızdır |
 | `dataset_type` | `string` | Örneğin `equity_history`, `nominal_ohlc` veya `market_data_eligibility` |
 | `ticker_or_instrument` | `string` | İstek kapsamındaki ticker/endeks/enstrüman kimliği; ayrı mantıksal zincir oluşturur |
 | `request_start_date` | ISO `date` | İstek döneminin kapsayıcı başlangıcı; dönem izolasyonunun parçasıdır |
@@ -58,6 +58,8 @@ Snapshot verileri ek bir Parquet bağımlılığı gerektirmeyen `canonical-json
 | `snapshot_schema_version` | `string` | Snapshot metadata şema sürümü; ilk sürümde `v1` |
 | `input_snapshot_ids` | `array[string]` | Türetilmiş snapshot'ın kaynak aldığı değişmez snapshot kimlikleri |
 | `identity_columns` | `array[string]` | Revision satır karşılaştırmasında kullanılan ticker/tarih anahtarları |
+| `revision_context` | `object` | Logical dataset anahtarını değiştirmeden revision'a bağlanan input checksum, takvim, mapping, katalog, config ve kod provenance değerleri |
+| `revision_context_checksum` | hex `string/null` | Context boş değilse canonical `revision_context` SHA özeti; bağlam değişikliği içerik aynı olsa bile yeni revision üretir |
 | `error_message` | `string/null` | `FAILED` veya `PARTIAL` sağlayıcı denemesinin açık hata bilgisi |
 | `revision` | `object/null` | Önceki `COMPLETE` snapshot'a göre provider revision fark özeti |
 
@@ -348,3 +350,68 @@ label_exclusion_reason
 ```
 
 `adjustment_factor = HGDG_KAPANIS / HG_KAPANIS` olarak hesaplanır. Değişim kontrolünde yalnız kayan nokta ve kaynak yuvarlama gürültüsünü bastırmak için `rtol=0.0001`, `atol=0.00005` kullanılır. Kesin fiyat uyuşmazlığı eşiği veya BİST fiyat adımı toleransı bu görevde belirlenmemiştir.
+
+## D029 Global BİST Takvimi Alanları
+
+`derived/isyatirim/global_bist_sessions`, yalnız doğrulanmış `COMPLETE` raw İş Yatırım hisse snapshot'larındaki gerçek `HGDG_TARIH` birleşimidir.
+
+| Alan | Kaynak/formül | Anlam | Feature/leakage kuralı |
+| --- | --- | --- | --- |
+| `session_date` | Raw İş Yatırım `HGDG_TARIH` birleşimi | Gerçek gözlenen global BİST oturumu | Sentetik hafta içi veya doldurma yok |
+| `session_index` | Artan `session_date` üzerinde sıfır tabanlı sıra | Exact shift/rolling oturum konumu | Security satır eksikliğinde sıkıştırılamaz |
+
+Takvim metadata'sı doğrudan kaynak snapshot ID/checksum'larını ve `verified_isyatirim_stock_session_union_v1` yöntemini taşır. Tek hissedeki eksik tarih global seansı kaldırmaz.
+
+## D029 XU100 Snapshot Alanları
+
+Raw seri `raw/isyatirim/xu100_index_history`; kabul edilen benchmark `derived/benchmark/validated_xu100_close` altında saklanır.
+
+| Alan | Katman | Anlam | Kabul/leakage kuralı |
+| --- | --- | --- | --- |
+| `index_code` | Raw + validated | Bağımsız endpoint endeks kimliği | Tam olarak `XU100` olmalıdır |
+| `source_timestamp_ms` | Raw + validated | Sağlayıcının değişmeden korunan epoch milisaniyesi | Sayısal ham değer canonicalizer tarafından tarihe çevrilmez |
+| `source_value` | Raw | Sağlayıcının değişmeden korunan endeks değeri | Pozitif ve sonlu olmalıdır |
+| `utc_calendar_date` | Raw + validated denetim | Epoch'un UTC takvim günü | Ana eşleme değildir |
+| `istanbul_calendar_date` | Raw denetim | UTC-aware timestamp'in `Europe/Istanbul` takvim günü | Doğrulama sonrası `prediction_date` olur |
+| `legacy_plus_one_date` | Raw + validated denetim | Eski sabit `+1 gün` adayının sonucu | Yalnız tanısal; ana yöntem/fallback değildir |
+| `prediction_date` | Validated | Kabul edilmiş İstanbul takvim günü | Global BİST seansıyla birebir eşleşir |
+| `validated_xu100_close` | Validated | Aynı seansın doğrulanmış XU100 kapanışı | Market/relative feature kaynağı |
+| `timestamp_resolution_rule` | Validated | `utc_epoch_ms_to_europe_istanbul_calendar_date_v1` | Sabit `+1 gün` kullanılmadığını denetler |
+| `validation_status` | Validated | Kabul edilen satırlarda `PASS` | Belirsizlikte snapshot üretilmez |
+
+`END_ENDEKS_KODU`, `END_TARIH`, `END_SEANS`, `END_DEGER` ve yFinance `XU100.IS` yalnız çapraz kontrol raporuna girer; doğrulanmış kapanışa fallback olamaz.
+
+## D029 baseline_v1 Feature Snapshot Alanları
+
+`derived/features/baseline_v1` anahtarı `security_id + prediction_date` olan tam 32 feature içerir. Sıra `FEATURE_CATALOG.md` ve `src/features/catalog.py` içindeki tek sabit listeyle belirlenir. Kimlikler model feature'ı değildir.
+
+Feature hesabına girebilen kaynak alanları yalnız şunlardır:
+
+```text
+security_id
+prediction_date
+yf_provider_open
+yf_provider_high
+yf_provider_low
+yf_provider_close
+is_tl_volume
+validated_xu100_close
+```
+
+Feature metadata/provenance alanları:
+
+| Alan | Anlam |
+| --- | --- |
+| `feature_set_id` | `baseline_v1` |
+| `feature_catalog_version` | Bağlayıcı katalog sürümü |
+| `feature_catalog_file_sha256` | `FEATURE_CATALOG.md` ham dosya özeti |
+| `feature_config_checksum` | Etkin merkezi `FeatureConfig` özeti |
+| `feature_names` / `feature_count` | Sıralı 32 alan ve sayısı |
+| `input_snapshot_ids` / `input_content_checksums` | Bütün doğrudan raw/identity/XU100/takvim girdileri |
+| `global_calendar_snapshot_id` / `global_calendar_checksum` | Exact oturum ızgarası bağı |
+| `xu100_snapshot_id` / `xu100_checksum` | Doğrulanmış benchmark bağı |
+| `ticker_mapping_version` / `ticker_mapping_checksum` | Tarih-etkin security kimlik bağı |
+| `revision_context_checksum` | İçerikten bağımsız provenance revizyon kimliği |
+| `quality_summary` | Her feature için `valid`, `missing`, `warmup`, `source_missing`, `invalid_math`, `xu100_missing`, `cross_section_insufficient`, `infinite_replaced` sayıları |
+
+Per-row 32 ayrı missing-reason sütunu üretilmez. `NaN` imputasyon yapılmadan korunur; sonsuz sonuçlar `NaN` yapılır ve kalite özetinde sayılır.

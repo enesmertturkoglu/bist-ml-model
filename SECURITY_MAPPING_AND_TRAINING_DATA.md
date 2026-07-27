@@ -25,9 +25,13 @@ python scripts/collect_market_data.py THYAO --start-date 2020-03-13 --end-date 2
 python scripts/resolve_security_identity.py --nominal-snapshot-id <NOMINAL_SNAPSHOT_ID>
 python scripts/clean_market_data.py --snapshot-set THYAO,<IS_RAW_ID>,<YF_RAW_ID>,<YF_NOMINAL_ID> --security-identity-snapshot-id <IDENTITY_SNAPSHOT_ID>
 python scripts/generate_labels.py --clean-snapshot-id <CLEAN_SNAPSHOT_ID>
+python scripts/build_global_calendar.py --isyatirim-raw-snapshot-id <IS_RAW_ID> --report reports/global_calendar.json
+python scripts/collect_xu100.py --start-date 2020-03-13 --end-date 2026-07-27 --global-calendar-snapshot-id <CALENDAR_SNAPSHOT_ID> --report reports/xu100_validation.json
+python scripts/generate_features.py --yfinance-raw-snapshot-id <YF_RAW_ID> --isyatirim-raw-snapshot-id <IS_RAW_ID> --identity-snapshot-id <IDENTITY_SNAPSHOT_ID> --xu100-snapshot-id <XU100_SNAPSHOT_ID> --calendar-snapshot-id <CALENDAR_SNAPSHOT_ID> --quality-report reports/baseline_v1_quality.csv
+python scripts/validate_feature_snapshot.py --snapshot-id <FEATURE_SNAPSHOT_ID>
 ```
 
-Birden fazla eski/güncel ticker için `--nominal-snapshot-id` ve `--snapshot-set` seçenekleri tekrarlanır. Identity snapshot'taki mapping checksum'u clean ve label metadata'sına taşınır. Feature snapshot ve model eğitim komutları henüz oluşturulmadı; bu aşamalar için komut uydurulmamalıdır.
+Birden fazla eski/güncel ticker için `--nominal-snapshot-id`, `--snapshot-set`, `--isyatirim-raw-snapshot-id` ve `--yfinance-raw-snapshot-id` seçenekleri tekrarlanır. END_* kabul çapraz kontrolü istenirse `collect_xu100.py` komutuna en az 20 adet `--isyatirim-stock-snapshot-id` eklenir. Identity snapshot'taki mapping checksum'u clean, label ve feature metadata'sına taşınır. LightGBM model eğitim komutu henüz oluşturulmadı; bu aşama için komut uydurulmamalıdır.
 
 ## 4. Mapping güncellenmezse ne olur?
 
