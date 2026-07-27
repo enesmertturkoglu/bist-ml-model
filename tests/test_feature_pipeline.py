@@ -108,4 +108,7 @@ def test_feature_quality_summary_is_compact_not_per_row_reason_columns(tmp_path)
         "cross_section_insufficient",
         "infinite_replaced",
     }
+    cs_ret_1 = result.quality_summary.set_index("feature_name").loc["cs_ret_1_rank"]
+    assert cs_ret_1["warmup"] == 20
+    assert cs_ret_1["source_missing"] == 0
     assert not any(column.startswith("missing_reason_") for column in result.frame.columns)

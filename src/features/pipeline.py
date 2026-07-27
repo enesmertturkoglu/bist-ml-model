@@ -91,13 +91,14 @@ class BaselineFeaturePipeline:
                 "cs_volume_anomaly_rank": "tl_volume_zscore_20",
             }[feature]
             insufficient = cross.insufficient_masks[feature]
+            source_reasons = reason_masks[source]
             reason_masks[feature] = {
-                "warmup": pd.Series(False, index=actual_indices),
-                "source_missing": cross.frame[source].isna() & cross.frame[feature].isna(),
-                "invalid_math": pd.Series(False, index=actual_indices),
-                "xu100_missing": pd.Series(False, index=actual_indices),
+                "warmup": source_reasons["warmup"],
+                "source_missing": source_reasons["source_missing"],
+                "invalid_math": source_reasons["invalid_math"],
+                "xu100_missing": source_reasons["xu100_missing"],
                 "cross_section_insufficient": insufficient,
-                "infinite_replaced": pd.Series(False, index=actual_indices),
+                "infinite_replaced": source_reasons["infinite_replaced"],
             }
         output = cross.frame.loc[
             :, ["security_id", "prediction_date", *BASELINE_V1_FEATURES]

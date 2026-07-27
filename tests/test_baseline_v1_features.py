@@ -68,6 +68,26 @@ def test_full_window_warmup_is_nan() -> None:
     assert result.loc[:13, "rsi_14_sma"].isna().all()
 
 
+def test_warmup_starts_at_first_actual_security_session() -> None:
+    frame = _aligned(35)
+    source_columns = [
+        "yf_provider_open",
+        "yf_provider_high",
+        "yf_provider_low",
+        "yf_provider_close",
+        "is_tl_volume",
+    ]
+    frame.loc[:9, source_columns] = np.nan
+    frame.loc[:9, "_source_row_present"] = False
+
+    computation = compute_baseline_features(frame)
+
+    assert computation.reason_masks["ret_20"]["warmup"].loc[29]
+    assert not computation.reason_masks["ret_20"]["source_missing"].loc[29]
+    assert not computation.reason_masks["ret_20"]["warmup"].loc[30]
+    assert np.isfinite(computation.frame.loc[30, "ret_20"])
+
+
 def test_price_features_are_invariant_to_positive_constant_scaling() -> None:
     source = _aligned()
     scaled = source.copy()

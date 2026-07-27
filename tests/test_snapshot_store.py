@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -394,6 +395,31 @@ def test_windows_permission_error_during_atomic_replace_is_retried(
 
     assert attempts == 3
     assert destination.read_text(encoding="utf-8") == "payload"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL regression")
+def test_windows_snapshot_directory_keeps_acl_inheritance(tmp_path: Path) -> None:
+    store = SnapshotStore(_config(tmp_path))
+    metadata = store.save_dataframe(_frame(), _request()).metadata
+    snapshot_directory = (store.config.data_root / metadata.file_path).parent
+    environment = os.environ.copy()
+    environment["SNAPSHOT_ACL_TEST_PATH"] = str(snapshot_directory)
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "(Get-Acl -LiteralPath $env:SNAPSHOT_ACL_TEST_PATH).AreAccessRulesProtected",
+        ],
+        check=True,
+        capture_output=True,
+        env=environment,
+        text=True,
+    )
+
+    assert completed.stdout.strip() == "False"
 
 
 def test_numeric_provider_epoch_fields_are_preserved_as_raw_integers(

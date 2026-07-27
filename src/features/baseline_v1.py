@@ -228,7 +228,12 @@ def _compute_one_security(frame: pd.DataFrame) -> pd.DataFrame:
 def _build_reason_masks(
     frame: pd.DataFrame,
 ) -> dict[str, dict[str, pd.Series]]:
-    position = frame.groupby("security_id", sort=False).cumcount()
+    session_index = pd.to_numeric(frame["session_index"], errors="raise")
+    source_present = frame["_source_row_present"].astype(bool)
+    first_source_session = session_index.where(source_present).groupby(
+        frame["security_id"], sort=False
+    ).transform("min")
+    sessions_since_first_source = session_index - first_source_session
     stock_missing_now = frame[
         [
             "yf_provider_open",
@@ -244,8 +249,18 @@ def _build_reason_masks(
     masks: dict[str, dict[str, pd.Series]] = {}
     for feature in BASELINE_V1_BASE_FEATURES:
         history = FEATURE_MINIMUM_HISTORY[feature]
-        warmup = position.lt(history - 1) & frame[feature].isna()
-        source_now = volume_missing_now if feature in VOLUME_FEATURES else stock_missing_now
+        warmup = (
+            source_present
+            & sessions_since_first_source.ge(0)
+            & sessions_since_first_source.lt(history - 1)
+            & frame[feature].isna()
+        )
+        if feature == "market_ret_1":
+            source_now = pd.Series(False, index=frame.index)
+        else:
+            source_now = (
+                volume_missing_now if feature in VOLUME_FEATURES else stock_missing_now
+            )
         if feature == "amihud_20":
             source_now = source_now | stock_missing_now
         source_window = source_now.groupby(frame["security_id"], sort=False).transform(

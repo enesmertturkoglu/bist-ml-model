@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import secrets
 import shutil
 import tempfile
 import time
@@ -579,9 +580,7 @@ class SnapshotStore:
         if final_directory.exists():
             raise SnapshotError(f"immutable snapshot path already exists: {final_directory}")
 
-        temporary_directory = Path(
-            tempfile.mkdtemp(prefix=".snapshot-tmp-", dir=logical_directory)
-        )
+        temporary_directory = self._create_temporary_directory(logical_directory)
         directory_committed = False
         try:
             temporary_data = temporary_directory / "data.jsonl"
@@ -648,6 +647,22 @@ class SnapshotStore:
                     raise
                 # Windows scanners/indexers can briefly hold newly fsynced paths.
                 time.sleep(0.05 * (2**attempt))
+
+    @staticmethod
+    def _create_temporary_directory(parent: Path) -> Path:
+        # Python 3.13 tempfile.mkdtemp() uses mode 0o700 on Windows, which creates
+        # a protected owner-only DACL. A later rename preserves that DACL on the
+        # immutable snapshot and makes it unreadable to other approved identities.
+        # Default Windows mkdir semantics inherit the parent ACL; POSIX keeps 0700.
+        mode = 0o777 if os.name == "nt" else 0o700
+        for _ in range(10):
+            candidate = parent / f".snapshot-tmp-{secrets.token_hex(8)}"
+            try:
+                candidate.mkdir(mode=mode)
+                return candidate
+            except FileExistsError:
+                continue
+        raise SnapshotError("could not allocate a unique temporary snapshot directory")
 
     def _read_records(self, metadata: SnapshotMetadata) -> tuple[Mapping[str, Any], ...]:
         path = self._physical_path(metadata.file_path)
