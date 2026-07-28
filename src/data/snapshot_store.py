@@ -7,8 +7,10 @@ import json
 import math
 import os
 import re
+import secrets
 import shutil
 import tempfile
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from numbers import Integral, Real
@@ -53,6 +55,7 @@ class SnapshotRequest:
     layer: str = "raw"
     input_snapshot_ids: tuple[str, ...] = ()
     identity_columns: tuple[str, ...] = ()
+    revision_context: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -124,6 +127,8 @@ class SnapshotMetadata:
     snapshot_schema_version: str = SNAPSHOT_SCHEMA_VERSION
     input_snapshot_ids: tuple[str, ...] = ()
     identity_columns: tuple[str, ...] = ()
+    revision_context: Mapping[str, Any] = field(default_factory=dict)
+    revision_context_checksum: str | None = None
     error_message: str | None = None
     revision: ProviderRevision | None = None
 
@@ -139,6 +144,7 @@ class SnapshotMetadata:
         result["input_snapshot_ids"] = list(self.input_snapshot_ids)
         result["identity_columns"] = list(self.identity_columns)
         result["request_parameters"] = _json_ready(self.request_parameters)
+        result["revision_context"] = _json_ready(self.revision_context)
         result["revision"] = self.revision.to_dict() if self.revision else None
         return result
 
@@ -181,6 +187,12 @@ class SnapshotMetadata:
             ),
             input_snapshot_ids=tuple(map(str, value.get("input_snapshot_ids", []))),
             identity_columns=tuple(map(str, value.get("identity_columns", []))),
+            revision_context=dict(value.get("revision_context", {})),
+            revision_context_checksum=(
+                str(value["revision_context_checksum"])
+                if value.get("revision_context_checksum") is not None
+                else None
+            ),
             error_message=(
                 str(value["error_message"])
                 if value.get("error_message") is not None
@@ -285,6 +297,9 @@ class SnapshotStore:
         if not isinstance(status, SnapshotStatus):
             status = SnapshotStatus(str(status))
         request_values = self._normalize_request(request)
+        revision_context_checksum = self._revision_context_checksum(
+            request_values["revision_context"]
+        )
         canonical = canonicalize_dataframe(
             frame, checksum_algorithm=self.config.checksum_algorithm
         )
@@ -299,14 +314,23 @@ class SnapshotStore:
             and previous is not None
             and previous.content_checksum == canonical.content_checksum
             and previous.schema_checksum == canonical.schema_checksum
+            and previous.revision_context_checksum == revision_context_checksum
         ):
             return SnapshotWriteResult(previous, created=False)
 
         revision_number = max(
             (item.revision_number for item in matching), default=0
         ) + 1
+        fingerprint_material = (
+            f"{canonical.content_checksum}:{canonical.schema_checksum}"
+            + (
+                f":{revision_context_checksum}"
+                if revision_context_checksum is not None
+                else ""
+            )
+        )
         fingerprint = _digest(
-            f"{canonical.content_checksum}:{canonical.schema_checksum}".encode("utf-8"),
+            fingerprint_material.encode("utf-8"),
             self.config.checksum_algorithm,
         )
         snapshot_id = (
@@ -372,6 +396,8 @@ class SnapshotStore:
             checksum_algorithm=self.config.checksum_algorithm,
             input_snapshot_ids=request_values["input_snapshot_ids"],
             identity_columns=request_values["identity_columns"],
+            revision_context=request_values["revision_context"],
+            revision_context_checksum=revision_context_checksum,
             error_message=error_message,
             revision=revision,
         )
@@ -478,6 +504,13 @@ class SnapshotStore:
             raise SnapshotCorruptError(
                 f"snapshot {metadata.snapshot_id} schema checksum mismatch"
             )
+        expected_context_checksum = self._revision_context_checksum(
+            metadata.revision_context
+        )
+        if expected_context_checksum != metadata.revision_context_checksum:
+            raise SnapshotCorruptError(
+                f"snapshot {metadata.snapshot_id} revision context checksum mismatch"
+            )
         expected_logical_key = self._logical_dataset_key(
             {
                 "source": metadata.source,
@@ -547,9 +580,7 @@ class SnapshotStore:
         if final_directory.exists():
             raise SnapshotError(f"immutable snapshot path already exists: {final_directory}")
 
-        temporary_directory = Path(
-            tempfile.mkdtemp(prefix=".snapshot-tmp-", dir=logical_directory)
-        )
+        temporary_directory = self._create_temporary_directory(logical_directory)
         directory_committed = False
         try:
             temporary_data = temporary_directory / "data.jsonl"
@@ -607,7 +638,31 @@ class SnapshotStore:
 
     @staticmethod
     def _replace_path(source: Path, destination: Path) -> None:
-        os.replace(source, destination)
+        for attempt in range(5):
+            try:
+                os.replace(source, destination)
+                return
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                # Windows scanners/indexers can briefly hold newly fsynced paths.
+                time.sleep(0.05 * (2**attempt))
+
+    @staticmethod
+    def _create_temporary_directory(parent: Path) -> Path:
+        # Python 3.13 tempfile.mkdtemp() uses mode 0o700 on Windows, which creates
+        # a protected owner-only DACL. A later rename preserves that DACL on the
+        # immutable snapshot and makes it unreadable to other approved identities.
+        # Default Windows mkdir semantics inherit the parent ACL; POSIX keeps 0700.
+        mode = 0o777 if os.name == "nt" else 0o700
+        for _ in range(10):
+            candidate = parent / f".snapshot-tmp-{secrets.token_hex(8)}"
+            try:
+                candidate.mkdir(mode=mode)
+                return candidate
+            except FileExistsError:
+                continue
+        raise SnapshotError("could not allocate a unique temporary snapshot directory")
 
     def _read_records(self, metadata: SnapshotMetadata) -> tuple[Mapping[str, Any], ...]:
         path = self._physical_path(metadata.file_path)
@@ -657,7 +712,18 @@ class SnapshotStore:
             "layer": layer,
             "input_snapshot_ids": tuple(map(str, request.input_snapshot_ids)),
             "identity_columns": tuple(map(str, request.identity_columns)),
+            "revision_context": _json_ready(dict(request.revision_context)),
         }
+
+    def _revision_context_checksum(
+        self, revision_context: Mapping[str, Any]
+    ) -> str | None:
+        if not revision_context:
+            return None
+        return _digest(
+            _canonical_json(revision_context).encode("utf-8"),
+            self.config.checksum_algorithm,
+        )
 
     def _logical_dataset_key(self, request_values: Mapping[str, Any]) -> str:
         payload = {
@@ -678,8 +744,16 @@ class SnapshotStore:
         )
 
     def _snapshot_id_for(self, metadata: SnapshotMetadata) -> str:
+        fingerprint_material = (
+            f"{metadata.content_checksum}:{metadata.schema_checksum}"
+            + (
+                f":{metadata.revision_context_checksum}"
+                if metadata.revision_context_checksum is not None
+                else ""
+            )
+        )
         fingerprint = _digest(
-            f"{metadata.content_checksum}:{metadata.schema_checksum}".encode("utf-8"),
+            fingerprint_material.encode("utf-8"),
             metadata.checksum_algorithm,
         )
         return (
@@ -821,6 +895,10 @@ def _default_identity_columns(columns: Sequence[str]) -> list[str]:
 
 
 def _temporal_kind(column: str, series: pd.Series) -> str | None:
+    # Numeric provider epochs must remain exact raw values. Name heuristics such
+    # as END_TARIH/source_timestamp_ms otherwise coerce milliseconds as ns.
+    if pd.api.types.is_numeric_dtype(series.dtype):
+        return None
     named = _temporal_name_kind(column)
     if named:
         return named

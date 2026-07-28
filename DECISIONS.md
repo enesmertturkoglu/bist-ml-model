@@ -769,6 +769,32 @@ Feature engineering, snapshot şeması, veri sızıntısı testleri, walk-forwar
 
 2026-07-27
 
+### D029 — Güvenli XU100, Global BİST Takvimi ve baseline_v1 Feature Snapshot'ı
+
+**Karar:**
+
+Ana benchmark serisi, İş Yatırım'ın hisse endpoint'indeki `END_*` yan alanlarından veya yFinance'tan türetilmeyecek; bağımsız `ChartData.aspx/IndexHistoricalAll` endpoint'inden tam `XU100` koduyla alınacaktır. Ham snapshot `index_code`, `source_timestamp_ms` ve `source_value` alanlarını değiştirmeden korur. Epoch milisaniye değeri önce UTC-aware yorumlanır, ardından `Europe/Istanbul` saat dilimine çevrilerek `prediction_date` elde edilir. Naive tarih dönüşümü veya sabit `+1 gün` ana yöntem olamaz. `utc_calendar_date` ve `legacy_plus_one_date` yalnız karşılaştırmalı denetim alanlarıdır.
+
+İstanbul tarih çözümü; tam XU100 kimliği, pozitif/sonlu değer, tekil timestamp ve tarih, İstanbul yerel gece yarısı, doğrulanmış global BİST seansı eşleşmesi ve UTC adayından üstün takvim kanıtı koşullarının tamamı sağlanırsa kabul edilir. Belirsizlikte pipeline fail-closed davranır. `END_*` en az 20 hisse üzerinde, yFinance ise yalnız `XU100.IS` ile tanısal çapraz kontroldür; ikisi de fallback kaynak değildir ve `^XU100` kullanılmaz.
+
+Global takvim yalnız fiziksel checksum doğrulamasından geçen `COMPLETE` İş Yatırım hisse snapshot'larında gerçekten gözlenen `HGDG_TARIH` oturumlarının birleşiminden kurulur. Sentetik hafta içi günleri eklenmez ve tek bir hissedeki eksik gün global seansı düşürmez. `session_date` tekil ve artan, `session_index` deterministiktir.
+
+`baseline_v1` feature snapshot'ı, D028'deki tam sıralı 32 feature'ı `security_id + prediction_date` anahtarıyla üretir. Provider OHLC yalnız raw yFinance snapshot'ından, TL hacmi raw İş Yatırım snapshot'ından, kimlik tarih-etkin identity snapshot'ından ve benchmark doğrulanmış XU100 snapshot'ından allowlist ile alınır. Global takvim ızgarasındaki eksik security oturumları rolling/shift hesabında korunur; çıktı yalnız gerçek provider satırlarını içerir. Doldurma, sentetik gözlem, ticker fallback'i, nominal/provider fiyat karışımı ve label/T+1 alanları yasaktır. Kesitsel ranklar yalnız aynı `prediction_date` içinde, en az 20 geçerli security ile ve label bağlantısından önce hesaplanır.
+
+Snapshot revizyon kimliği içerik ve şema checksum'larına ek olarak `revision_context_checksum` ile provenance bağlamına bağlanır. Aynı içerik ve aynı bağlam idempotenttir; input/XU100/takvim/mapping/katalog/config/kod SHA bağlamlarından biri değişirse çıktı değerleri aynı kalsa bile yeni revision oluşur ve eski snapshot korunur. Feature metadata'sı sıralı feature listesini, `FEATURE_CATALOG.md` SHA-256 özetini, kalite özetini ve bütün doğrudan kaynak snapshot ID/checksum'larını taşır.
+
+**Gerekçe:**
+
+Sağlayıcı epoch timestamp'ini açık saat dilimi kanıtıyla çözmek tarih kaymasını; bağımsız benchmark ve gözlenen global takvim kullanmak yanlış endeks/oturum eşleşmesini; provenance-duyarlı revision ise aynı görünen çıktının farklı kaynak bağlamında sessizce yeniden kullanılmasını engeller. Allowlist, tam oturum ızgarası ve label öncesi kesitsel hesaplama D028 leakage sözleşmesini çalıştırılabilir ve denetlenebilir hale getirir.
+
+**Etkilenen alanlar:**
+
+İş Yatırım XU100 istemcisi, global takvim, snapshot metadata/revision kimliği, merkezi feature config, feature input birleştirme, 32 feature hesabı, kalite raporu, CLI akışı, veri sözlüğü, durum belgesi ve leakage testleri.
+
+**Tarih:**
+
+2026-07-27
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

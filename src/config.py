@@ -91,6 +91,27 @@ class LabelConfig:
 
 
 @dataclass(frozen=True)
+class FeatureConfig:
+    """D028 baseline feature contract and deterministic quality thresholds."""
+
+    feature_set_id: str = "baseline_v1"
+    feature_catalog_version: str = "baseline_v1"
+    feature_dataset_type: str = "baseline_v1"
+    minimum_cross_section_size: int = 20
+
+    def checksum(self, algorithm: str = "sha256") -> str:
+        """Return a stable checksum of the effective feature contract."""
+
+        encoded = json.dumps(
+            _json_ready(asdict(self)),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.new(algorithm, encoded).hexdigest()
+
+
+@dataclass(frozen=True)
 class MarketDataConfig:
     """Filesystem, date, checksum and provider settings for data collection."""
 
@@ -115,6 +136,7 @@ class MarketDataConfig:
     snapshot_statuses: tuple[str, ...] = tuple(status.value for status in SnapshotStatus)
     cleaning: CleaningConfig = field(default_factory=CleaningConfig)
     label: LabelConfig = field(default_factory=LabelConfig)
+    feature: FeatureConfig = field(default_factory=FeatureConfig)
     isyatirim: ProviderRequestConfig = field(
         default_factory=lambda: ProviderRequestConfig(
             timeout_seconds=60.0,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -35,6 +36,7 @@ def _request(
     end: str = "2024-01-02",
     layer: str = "raw",
     dataset_type: str = "equity_history",
+    revision_context: dict[str, str] | None = None,
 ) -> SnapshotRequest:
     return SnapshotRequest(
         source=source,
@@ -47,6 +49,7 @@ def _request(
         code_commit_sha="a" * 40,
         layer=layer,
         identity_columns=("ticker", "date"),
+        revision_context=revision_context or {},
     )
 
 
@@ -332,3 +335,109 @@ def test_required_metadata_fields_are_recorded(tmp_path: Path) -> None:
     }
 
     assert required.issubset(metadata)
+
+
+def test_revision_context_is_idempotent_when_content_and_context_match(
+    tmp_path: Path,
+) -> None:
+    store = SnapshotStore(_config(tmp_path))
+    request = _request(revision_context={"calendar_checksum": "calendar-a"})
+
+    first = store.save_dataframe(_frame(), request)
+    second = store.save_dataframe(_frame(), request)
+
+    assert first.created
+    assert not second.created
+    assert second.metadata.snapshot_id == first.metadata.snapshot_id
+    assert first.metadata.revision_context_checksum is not None
+    store.verify_snapshot(first.metadata)
+
+
+def test_revision_context_change_creates_revision_even_when_content_matches(
+    tmp_path: Path,
+) -> None:
+    store = SnapshotStore(_config(tmp_path))
+    first = store.save_dataframe(
+        _frame(), _request(revision_context={"calendar_checksum": "calendar-a"})
+    ).metadata
+    second = store.save_dataframe(
+        _frame(), _request(revision_context={"calendar_checksum": "calendar-b"})
+    ).metadata
+
+    assert second.snapshot_id != first.snapshot_id
+    assert second.logical_dataset_key == first.logical_dataset_key
+    assert second.revision_number == 2
+    assert second.previous_snapshot_id == first.snapshot_id
+    assert second.content_checksum == first.content_checksum
+    assert second.revision_context_checksum != first.revision_context_checksum
+
+
+def test_windows_permission_error_during_atomic_replace_is_retried(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    attempts = 0
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.write_text("payload", encoding="utf-8")
+    real_replace = os.replace
+
+    def flaky_replace(left: Path, right: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise PermissionError("temporary Windows file lock")
+        real_replace(left, right)
+
+    monkeypatch.setattr("src.data.snapshot_store.os.replace", flaky_replace)
+    monkeypatch.setattr("src.data.snapshot_store.time.sleep", lambda _: None)
+
+    SnapshotStore._replace_path(source, destination)
+
+    assert attempts == 3
+    assert destination.read_text(encoding="utf-8") == "payload"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL regression")
+def test_windows_snapshot_directory_keeps_acl_inheritance(tmp_path: Path) -> None:
+    store = SnapshotStore(_config(tmp_path))
+    metadata = store.save_dataframe(_frame(), _request()).metadata
+    snapshot_directory = (store.config.data_root / metadata.file_path).parent
+    environment = os.environ.copy()
+    environment["SNAPSHOT_ACL_TEST_PATH"] = str(snapshot_directory)
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "(Get-Acl -LiteralPath $env:SNAPSHOT_ACL_TEST_PATH).AreAccessRulesProtected",
+        ],
+        check=True,
+        capture_output=True,
+        env=environment,
+        text=True,
+    )
+
+    assert completed.stdout.strip() == "False"
+
+
+def test_numeric_provider_epoch_fields_are_preserved_as_raw_integers(
+    tmp_path: Path,
+) -> None:
+    store = SnapshotStore(_config(tmp_path))
+    frame = pd.DataFrame(
+        {
+            "index_code": ["XU100"],
+            "source_timestamp_ms": [1704142800000],
+            "END_TARIH": [1704142800000],
+            "source_value": [7624.29],
+        }
+    )
+    snapshot = store.save_dataframe(frame, _request(dataset_type="index_history"))
+    loaded = store.read_dataframe(snapshot.metadata)
+
+    assert loaded.loc[0, "source_timestamp_ms"] == 1704142800000
+    assert loaded.loc[0, "END_TARIH"] == 1704142800000
+    assert snapshot.metadata.column_types["source_timestamp_ms"] == "integer"
+    assert snapshot.metadata.column_types["END_TARIH"] == "integer"
