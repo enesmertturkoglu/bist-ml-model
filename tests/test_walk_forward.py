@@ -115,6 +115,10 @@ def test_default_first_fold_counts_warmup_and_purge_before_252_fit_sessions() ->
     )
 
     assert len(folds) == 1
+    assert folds[0].training_start_date == dates[20].date().isoformat()
+    assert folds[0].fit_calendar_session_count == 255
+    assert folds[0].fit_labeled_session_count == 252
+    assert folds[0].fit_purged_session_count == 3
 
 
 def test_synthetic_data_produces_two_full_60_validation_20_test_folds() -> None:
@@ -130,6 +134,13 @@ def test_synthetic_data_produces_two_full_60_validation_20_test_folds() -> None:
     splits = [split_fold_rows(dataset.panel, fold) for fold in folds]
 
     assert len(folds) == 2
+    assert [fold.fit_calendar_session_count for fold in folds] == [255, 275]
+    assert [fold.fit_labeled_session_count for fold in folds] == [252, 272]
+    assert [fold.fit_purged_session_count for fold in folds] == [3, 3]
+    assert [fold.validation_calendar_session_count for fold in folds] == [60, 60]
+    assert [fold.validation_labeled_session_count for fold in folds] == [57, 57]
+    assert [fold.validation_purged_session_count for fold in folds] == [3, 3]
+    assert [fold.test_calendar_session_count for fold in folds] == [20, 20]
     assert [len(rows.fit["prediction_date"].unique()) for rows in splits] == [252, 272]
     assert [len(rows.validation["prediction_date"].unique()) for rows in splits] == [57, 57]
     assert [len(rows.test["prediction_date"].unique()) for rows in splits] == [20, 20]

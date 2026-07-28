@@ -70,10 +70,26 @@ def test_two_fold_synthetic_pipeline_is_oos_immutable_and_idempotent(tmp_path) -
     feature_schema = json.loads(
         (first.artifact.path / "feature_schema.json").read_text(encoding="utf-8")
     )
+    first_fold_metadata = json.loads(
+        (
+            first.artifact.path
+            / "folds"
+            / "fold_001"
+            / "metadata.json"
+        ).read_text(encoding="utf-8")
+    )
     assert metadata["feature_names_in_order"] == list(BASELINE_V1_FEATURES)
     assert metadata["random_seed"] == 42
     assert metadata["training_fingerprint"]
     assert feature_schema["feature_count"] == 32
+    assert first_fold_metadata["validation_calendar_session_count"] == 20
+    assert first_fold_metadata["validation_labeled_session_count"] == 17
+    assert first_fold_metadata["validation_purged_session_count"] == 3
+    assert first_fold_metadata["validation_used_session_count"] == 17
+    assert first_fold_metadata["fit_calendar_session_count"] == 20
+    assert first_fold_metadata["fit_labeled_session_count"] == 17
+    assert first_fold_metadata["fit_purged_session_count"] == 3
+    assert first_fold_metadata["fit_used_session_count"] == 17
     assert set(first.oos_metrics) == {
         "classification",
         "daily_precision_at_5",

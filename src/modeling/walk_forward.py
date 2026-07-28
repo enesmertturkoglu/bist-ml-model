@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from typing import Any
 
 import pandas as pd
 
@@ -18,16 +19,23 @@ class WalkForwardFold:
     fold_id: str
     training_start_date: str
     training_end_date: str
+    fit_calendar_session_count: int
+    fit_labeled_session_count: int
+    fit_purged_session_count: int
     validation_start_date: str
     validation_end_date: str
+    validation_calendar_session_count: int
+    validation_labeled_session_count: int
+    validation_purged_session_count: int
     test_start_date: str
     test_end_date: str
+    test_calendar_session_count: int
 
     @property
     def model_version_suffix(self) -> str:
         return self.fold_id
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -64,6 +72,10 @@ def generate_walk_forward_folds(
     settings = config or ModelTrainingConfig()
     if settings.training_window != "expanding":
         raise WalkForwardError("only expanding training windows are supported")
+    if settings.validation_sessions <= settings.label_horizon_sessions:
+        raise WalkForwardError(
+            "validation window must exceed the label purge horizon"
+        )
     cutoff = pd.Timestamp(as_of_date).normalize()
     dates = _sessions(calendar, cutoff)
     if not dates:
@@ -89,6 +101,7 @@ def generate_walk_forward_folds(
         )
 
     folds: list[WalkForwardFold] = []
+    training_start_index = settings.minimum_feature_history_sessions - 1
     current_test_index = first_test_index
     fold_number = 1
     while current_test_index + settings.test_sessions <= len(dates):
@@ -98,15 +111,29 @@ def generate_walk_forward_folds(
         training_end_index = validation_start_index - 1
         validation_end_index = current_test_index - 1
         test_end_index = current_test_index + settings.test_sessions - 1
+        fit_calendar_session_count = validation_start_index - training_start_index
+        fit_purged_session_count = settings.label_horizon_sessions
+        validation_purged_session_count = settings.label_horizon_sessions
         folds.append(
             WalkForwardFold(
                 fold_id=f"fold_{fold_number:03d}",
-                training_start_date=dates[0].date().isoformat(),
+                training_start_date=dates[training_start_index].date().isoformat(),
                 training_end_date=dates[training_end_index].date().isoformat(),
+                fit_calendar_session_count=fit_calendar_session_count,
+                fit_labeled_session_count=(
+                    fit_calendar_session_count - fit_purged_session_count
+                ),
+                fit_purged_session_count=fit_purged_session_count,
                 validation_start_date=dates[validation_start_index].date().isoformat(),
                 validation_end_date=dates[validation_end_index].date().isoformat(),
+                validation_calendar_session_count=settings.validation_sessions,
+                validation_labeled_session_count=(
+                    settings.validation_sessions - validation_purged_session_count
+                ),
+                validation_purged_session_count=validation_purged_session_count,
                 test_start_date=dates[current_test_index].date().isoformat(),
                 test_end_date=dates[test_end_index].date().isoformat(),
+                test_calendar_session_count=settings.test_sessions,
             )
         )
         current_test_index += settings.test_sessions
@@ -131,6 +158,8 @@ def split_fold_rows(panel: pd.DataFrame, fold: WalkForwardFold) -> FoldRows:
     frame = panel.copy()
     frame["prediction_date"] = pd.to_datetime(frame["prediction_date"]).dt.normalize()
     frame["label_available_date"] = pd.to_datetime(frame["label_available_date"])
+    training_start = pd.Timestamp(fold.training_start_date)
+    training_end = pd.Timestamp(fold.training_end_date)
     validation_start = pd.Timestamp(fold.validation_start_date)
     validation_end = pd.Timestamp(fold.validation_end_date)
     test_start = pd.Timestamp(fold.test_start_date)
@@ -141,7 +170,7 @@ def split_fold_rows(panel: pd.DataFrame, fold: WalkForwardFold) -> FoldRows:
     fit = frame.loc[
         eligible
         & labeled
-        & frame["prediction_date"].lt(validation_start)
+        & frame["prediction_date"].between(training_start, training_end)
         & frame["label_available_date"].lt(validation_start)
     ].copy()
     validation = frame.loc[

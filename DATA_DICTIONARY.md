@@ -441,11 +441,20 @@ Walk-forward fold tanımı aşağıdaki tarih alanlarını taşır:
 fold_id
 training_start_date
 training_end_date
+fit_calendar_session_count
+fit_labeled_session_count
+fit_purged_session_count
 validation_start_date
 validation_end_date
+validation_calendar_session_count
+validation_labeled_session_count
+validation_purged_session_count
 test_start_date
 test_end_date
+test_calendar_session_count
 ```
+
+`training_start_date`, 21 oturumluk warm-up tamamlandıktan sonraki ilk oturumdur. `fit_calendar_session_count` bu tarihten validation başlangıcından önceki son takvim oturumuna kadar olan nominal expanding fit penceresini; `fit_labeled_session_count` strict availability sonrası kullanılabilir oturumları; `fit_purged_session_count` ise label sonucu henüz bilinmeyen son üç oturumu gösterir. Validation tarafında aynı ayrım 60 takvim oturumu, 57 labeled oturum ve 3 purged oturum olarak saklanır. `fit_used_session_count` ve `validation_used_session_count`, D030 eligibility ve geçerli label koşullarından sonra modelde fiilen en az bir satırla temsil edilen oturum sayılarıdır.
 
 Fit satırında `label_available_date < validation_start_date`, validation satırında `label_available_date < test_start_date` zorunludur. Test satırları label durumundan bağımsız olarak eligible ise skorlanır.
 

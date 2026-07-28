@@ -31,6 +31,16 @@ raw snapshots
 - `SECURITY_MAPPING_AND_TRAINING_DATA.md`
 - `AGENTS.md`
 
+## Bağımlılıklar ve test
+
+Doğrulanmış çalışma zamanı bağımlılıkları `requirements.txt`, test bağımlılıkları
+ise `requirements-dev.txt` içinde tam sürümleriyle sabitlenmiştir.
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
 ## Sıradaki aşama
 
 - Tam aktif BİST evreni ve mapping sürümünü dondurmak

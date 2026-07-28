@@ -823,6 +823,8 @@ Aktif pay evreni, nominal OHLC ve hacim girdileri, feature/label join'i, eğitim
 
 `label_available_date`, `prediction_date` sonrasındaki üçüncü D029 global BİST oturumudur; ticker içi satır `shift(3)` kullanılamaz. Her foldda `fit_row.label_available_date < validation_start_date` ve `validation_row.label_available_date < test_start_date` purge koşulları zorunludur.
 
+Fold metadata'sı takvim penceresiyle label kullanılabilirliğini ayrı taşır. Fit için `fit_calendar_session_count`, `fit_labeled_session_count`, `fit_purged_session_count`; validation için `validation_calendar_session_count`, `validation_labeled_session_count`, `validation_purged_session_count` kaydedilir. `training_start_date`, 21 oturumluk feature warm-up tamamlandıktan sonraki ilk skorlanabilir oturumdur. Bağlayıcı 60 oturumluk validation penceresinde üç oturumluk availability purge nedeniyle 57 labeled oturum kullanılabilir; 60 oturumluk takvim penceresi 57 gibi raporlanamaz.
+
 Walk-forward penceresi expanding training, 60 global oturum validation ve 20 global oturum test olarak uygulanır; her test bloğu başında model yeniden eğitilir. Validation eğitim geçmişinin zaman sıralı son bölümüdür. Aynı `prediction_date` içindeki bütün securities tek bir train, validation veya test grubunda kalır. Random split yasaktır ve test verisi early stopping veya parametre seçimi için kullanılamaz.
 
 İlk gerçek test tarihi bu kararla sabitlenmemiştir. Tam aktif BİST snapshot'ları üretildikten sonra 21 oturum warm-up, en az 252 purged fit oturumu, 60 validation oturumu, iki sınıf ve pozitif örnek dağılımını gösteren fold feasibility raporu hazırlanacak; tarih ayrı kararla kesinleşecektir.

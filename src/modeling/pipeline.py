@@ -154,6 +154,11 @@ class LightGBMWalkForwardPipeline:
             metrics = {
                 "fold_id": fold.fold_id,
                 "model_version": model_version,
+                "fit_used_session_count": int(rows.fit["prediction_date"].nunique()),
+                "validation_used_session_count": int(
+                    rows.validation["prediction_date"].nunique()
+                ),
+                "test_scored_session_count": int(rows.test["prediction_date"].nunique()),
                 "fit_row_count": int(len(rows.fit)),
                 "validation_row_count": int(len(rows.validation)),
                 "test_scored_row_count": int(len(rows.test)),
@@ -175,6 +180,9 @@ class LightGBMWalkForwardPipeline:
                 **{key: metrics[key] for key in (
                     "fold_id",
                     "model_version",
+                    "fit_used_session_count",
+                    "validation_used_session_count",
+                    "test_scored_session_count",
                     "fit_row_count",
                     "validation_row_count",
                     "test_scored_row_count",

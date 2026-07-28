@@ -103,11 +103,12 @@ def test_early_stopping_receives_only_validation_not_test(monkeypatch) -> None:
 
     fit_lightgbm_fold(rows.fit, rows.validation, config=config)
     _, _, kwargs = _FakeLGBMClassifier.last_instance.fit_arguments
-    eval_x, eval_y = kwargs["eval_set"][0]
+    eval_x = kwargs["eval_X"]
+    eval_y = kwargs["eval_y"]
 
     pd.testing.assert_frame_equal(eval_x.reset_index(drop=True), model_matrix(rows.validation).reset_index(drop=True))
     assert eval_y.reset_index(drop=True).equals(rows.validation["label"].astype(int).reset_index(drop=True))
-    assert len(kwargs["eval_set"]) == 1
+    assert "eval_set" not in kwargs
 
 
 def test_positive_class_probability_uses_second_column() -> None:

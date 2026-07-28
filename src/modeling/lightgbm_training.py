@@ -57,7 +57,8 @@ def fit_lightgbm_fold(
     model.fit(
         fit_x,
         fit_y,
-        eval_set=[(validation_x, validation_y)],
+        eval_X=validation_x,
+        eval_y=validation_y,
         eval_metric=settings.early_stopping_metric,
         callbacks=[
             early_stopping(settings.early_stopping_rounds, verbose=False),
