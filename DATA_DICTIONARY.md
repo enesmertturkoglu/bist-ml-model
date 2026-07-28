@@ -417,3 +417,60 @@ Feature metadata/provenance alanları:
 | `quality_summary` | Her feature için `valid`, `missing`, `warmup`, `source_missing`, `invalid_math`, `xu100_missing`, `cross_section_insufficient`, `infinite_replaced` sayıları |
 
 Per-row 32 ayrı missing-reason sütunu üretilmez. `NaN` imputasyon yapılmadan korunur; sonsuz sonuçlar `NaN` yapılır ve kalite özetinde sayılır.
+
+## D030 Prediction Universe ve Eğitim Dataset Alanları
+
+Prediction universe anahtarı `security_id + prediction_date` olur. Aktif master evreni sabit security listesi veya aynı anahtarı taşıyan tarih-etkin üyelik tablosu olarak verilebilir; duplicate master/observation/feature anahtarı açık hatadır.
+
+| Alan | Kaynak/formül | Anlam | Leakage/model kuralı |
+| --- | --- | --- | --- |
+| `prediction_eligible` | D030 koşullarının tamamı | Satırın T kapanışı sonrasında skorlanabilir olduğunu gösterir | Yalnız T ve geçmiş bilgi |
+| `prediction_exclusion_reason` | İlk fail-closed D030 nedeni | `NOT_IN_MASTER_UNIVERSE`, `NO_T_OBSERVATION`, `INVALID_T_OHLC`, `NO_TRADE_ON_T`, `MISSING_TRADE_EVIDENCE`, `INSUFFICIENT_HISTORY`, `MISSING_FEATURE_ROW`, `MISSING_XU100_SESSION`; duplicate feature koşuyu durdurur | Model feature'ı değildir |
+| `available_history_sessions` | Security'nin ilk gerçek gözleminden T'ye global `session_index` farkı + 1 | 21 oturum warm-up kontrolü | Eksik security günleri sıkıştırılmaz |
+| `label_available_date` | T sonrasındaki üçüncü global BİST oturumu | Labelın as-of zamanda bilindiği ilk tarih | Ticker satır `shift(3)` kullanılmaz |
+| `feature_snapshot_id` | Doğrulanmış feature girdisi | Satırın feature provenance bağı | Model feature'ı değildir |
+| `label_snapshot_id` | Doğrulanmış label girdisi | Satırın label provenance bağı | Model feature'ı değildir |
+
+T-günü OHLC geçerliliği yalnız identity snapshot'taki `yf_nominal_open/high/low/close` ile kontrol edilir. İşlem kanıtı raw İş Yatırım `HGDG_HACIM → is_tl_volume` veya raw yFinance `Volume → yf_share_volume` pozitifliğidir; ikisi de yoksa `MISSING_TRADE_EVIDENCE`, ikisi de mevcut ve sıfırsa `NO_TRADE_ON_T` üretilir. Bu OHLC/hacim alanları evren audit girdileridir, 32 feature model matrisine eklenmez.
+
+## D031–D033 Walk-Forward, OOS ve Model Artifact Alanları
+
+Walk-forward fold tanımı aşağıdaki tarih alanlarını taşır:
+
+```text
+fold_id
+training_start_date
+training_end_date
+fit_calendar_session_count
+fit_labeled_session_count
+fit_purged_session_count
+validation_start_date
+validation_end_date
+validation_calendar_session_count
+validation_labeled_session_count
+validation_purged_session_count
+test_start_date
+test_end_date
+test_calendar_session_count
+```
+
+`training_start_date`, 21 oturumluk warm-up tamamlandıktan sonraki ilk oturumdur. `fit_calendar_session_count` bu tarihten validation başlangıcından önceki son takvim oturumuna kadar olan nominal expanding fit penceresini; `fit_labeled_session_count` strict availability sonrası kullanılabilir oturumları; `fit_purged_session_count` ise label sonucu henüz bilinmeyen son üç oturumu gösterir. Validation tarafında aynı ayrım 60 takvim oturumu, 57 labeled oturum ve 3 purged oturum olarak saklanır. `fit_used_session_count` ve `validation_used_session_count`, D030 eligibility ve geçerli label koşullarından sonra modelde fiilen en az bir satırla temsil edilen oturum sayılarıdır.
+
+Fit satırında `label_available_date < validation_start_date`, validation satırında `label_available_date < test_start_date` zorunludur. Test satırları label durumundan bağımsız olarak eligible ise skorlanır.
+
+OOS minimum şeması:
+
+| Alan | Anlam |
+| --- | --- |
+| `security_id`, `observed_ticker`, `prediction_date` | Kimlik ve skor anı; feature değildir |
+| `model_version`, `fold_id` | `<experiment_id>_fold_NNN` ve kaynak test fold'u |
+| `probability_up_5pct` | Ham `LGBMClassifier.predict_proba(X)[:,1]` skoru |
+| `predicted_class_default_threshold` | `probability_up_5pct >= 0.50` |
+| `daily_rank` | Tarih içinde skor azalan, `security_id` artan deterministik sıra |
+| `prediction_eligible`, `prediction_exclusion_reason` | D030 evren sonucu/audit alanı |
+| `label`, `label_status` | Mevcutsa gerçekleşen sonuç; rankı değiştirmez, geçersizse metrikten çıkarılır |
+| `feature_snapshot_id`, `label_snapshot_id` | OOS provenance bağları |
+
+Daily Precision@K tarih satırı `requested_k`, `effective_k`, `selected_count`, `valid_label_count`, `positive_count`, `precision_at_k` ve `label_coverage_at_k` alanlarını taşır. Önce seçim yapılır; seçilmiş `NA` label yerine alt ranktan satır alınmaz.
+
+`models/lightgbm/<experiment_id>/metadata.json` ve fold metadata'sı model/fold sürümü, UTC eğitim zamanı, as-of/dönem sınırları, son kullanılabilir label tarihi, feature/label snapshot ID ve checksum'ları, feature katalog checksum'u, sıralı 32 feature, effective LightGBM parametreleri, random seed, kod commit SHA, satır/sınıf oranları, fold tanımları, train/validation/OOS metrikleri ve `training_fingerprint` alanlarını saklar. Fingerprint kod SHA + config checksum + feature/label snapshot checksum'ları + katalog checksum + fold tanımları + seed bağlamıdır. Artifact klasörü atomik ve değişmezdir; aynı tamamlanmış fingerprint mevcut experiment'ı döndürür.

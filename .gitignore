@@ -44,6 +44,7 @@ htmlcov/
 .coverage.*
 .cache/
 /data/
+/models/
 nosetests.xml
 coverage.xml
 *.cover
