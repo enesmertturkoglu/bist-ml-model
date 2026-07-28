@@ -6,7 +6,7 @@
 
 **Kaynaklar:** İş Yatırım web veri uç noktası (repo içi dayanıklı istemci; `isyatirimhisse 5.0.1` davranışı referans alınmıştır) ve yFinance (`yfinance 1.5.2`)
 
-Bu sözlük yalnız kaynak kabul testinde gerçekten gözlenen sütunları ve kaynak ölçeği testinde bunlardan üretilen açık kalite alanlarını içerir. `T+1–T+3` işlem yapılabilirlik, kurumsal işlem ve gelecekteki split faktörü model feature'ı değildir. Tarihsel düzeltilmiş değerler ve yFinance action geçmişi bugünkü sorguda gelecekteki düzeltmeleri içerebildiği için point-in-time feature olarak kullanılamaz.
+Bu sözlük kaynak kabul testinde gerçekten gözlenen sütunları, bunlardan üretilen açık kalite alanlarını ve doğrulanmış derived XU100, global BİST takvimi ile `baseline_v1` feature snapshot alanlarını içerir. `T+1–T+3` işlem yapılabilirlik, kurumsal işlem ve gelecekteki split faktörü model feature'ı değildir. Tarihsel düzeltilmiş değerler ve yFinance action geçmişi bugünkü sorguda gelecekteki düzeltmeleri içerebildiği için point-in-time feature olarak kullanılamaz.
 
 ## Veri Snapshot Katmanları
 
@@ -22,7 +22,7 @@ data/
 ```
 
 - `raw`: Sağlayıcı alanları ve değerleri değiştirilmeden saklanır. yFinance tarih indeksi yalnız serializasyon için yerel `date` sütununa taşınır ve istek tickera `ticker` kimliği eklenir. İş Yatırım'ın kabul edilmiş yardımcı alanları aynı ham frame içinde korunur.
-- `derived`: Ham veriyle karışmayan dönüşüm çıktılarıdır. `yfinance/nominal_ohlc` D024 nominal OHLC ve split-normalizasyon denetim alanlarını; `security_identity/nominal_ohlc` D027 security birleştirmesini; `cleaning/market_data_eligibility` D022/D023 temizleme, kalite ve işlem uygunluğu alanlarını içerir. Her türetilmiş snapshot kaynak ham/türetilmiş snapshot'larına `input_snapshot_ids` ile bağlanır.
+- `derived`: Ham veriyle karışmayan dönüşüm çıktılarıdır. `yfinance/nominal_ohlc` D024 nominal OHLC ve split-normalizasyon denetim alanlarını; `security_identity/nominal_ohlc` D027 security birleştirmesini; `cleaning/market_data_eligibility` D022/D023 temizleme, kalite ve işlem uygunluğu alanlarını; `isyatirim/global_bist_sessions` gözlenen global takvimi; `benchmark/validated_xu100_close` doğrulanmış benchmark'ı; `features/baseline_v1` sıralı 32 feature'ı içerir. Her türetilmiş snapshot kaynak ham/türetilmiş snapshot'larına `input_snapshot_ids` ile bağlanır.
 - `manifests`: Commit edilmiş snapshot kayıtları ile gerçek sağlayıcı revision farklarını tutar. Geçici `.snapshot-tmp-*` dosya veya dizinleri manifest kaydı olmadan geçerli snapshot sayılmaz.
 
 Snapshot verileri ek bir Parquet bağımlılığı gerektirmeyen `canonical-jsonl-v1` biçiminde saklanır. Checksum öncesinde sütun ve satır sırası, tarih, sayısal değer ve null gösterimi deterministik hale getirilir. Varsayılan algoritma `sha256`dır. Fiziksel veri ve metadata önce aynı dosya sisteminde geçici dizine yazılır, ardından atomik olarak son değişmez dizinine taşınır; manifest atomik olarak son commit sınırıdır.
@@ -84,6 +84,8 @@ Snapshot verileri ek bir Parquet bağımlılığı gerektirmeyen `canonical-json
 
 ## İş Yatırım / `isyatirimhisse`
 
+`END_ENDEKS_KODU`, `END_TARIH`, `END_SEANS` ve `END_DEGER` yalnız XU100 kalite ve çapraz kontrolünde kullanılır; feature ana kaynağı değildir ve doğrulanmış XU100 snapshot'ına fallback olamaz. Kabul panelinde literal endeks kodu `XU100` yerine `1` gözlenmiştir. Tarih, seans ve değer aynı gün farklı hisseler arasındaki tutarlılığı doğrulamak için kullanılır. Market ve relative feature'ların tek benchmark kaynağı `validated_xu100_close` alanıdır.
+
 | Alan adı | Kaynak sütun adı | Veri tipi | Ham/düzeltilmiş | Anlamı | Tahmin anında kullanılabilirlik | Label/backtest kullanım amacı | Eksik değer davranışı | Veri kalite kontrolü |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `symbol` | `HGDG_HS_KODU` | `object` | Kimlik | BİST işlem kodu | T ve öncesinde mevcut | Hisse/tarih anahtarı | Eksikse kayıt kullanılamaz | İstenen sembol ve yFinance `.IS` koduyla eşleştir |
@@ -93,10 +95,10 @@ Snapshot verileri ek bir Parquet bağımlılığı gerektirmeyen `canonical-json
 | `adjusted_low` | `HGDG_MIN` | `float64` | Düzeltilmiş | Düzeltilmiş günlük en düşük fiyat | T tarihinde sorgulanabilir; gelecekteki düzeltmelerden etkilenebilir | Kaynak doğrulama; tavan ve ham label hesabında kullanılmaz | Eksik olarak korunur | Pozitiflik, düzeltilmiş OHLC sınırları ve katsayı tutarlılığı |
 | `adjusted_high` | `HGDG_MAX` | `float64` | Düzeltilmiş | Düzeltilmiş günlük en yüksek fiyat | T tarihinde sorgulanabilir; gelecekteki düzeltmelerden etkilenebilir | Kaynak doğrulama; tavan ve ham label hesabında kullanılmaz | Eksik olarak korunur | Pozitiflik, düzeltilmiş OHLC sınırları ve katsayı tutarlılığı |
 | `is_tl_volume` | `HGDG_HACIM` | `float64` | Hacim; fiyat düzeltmesi uygulanmıyor | Günlük TL işlem hacmi; kabul örneğinde `HG_HACIM` ile aynı değer | İlgili günün kapanışı sonrasında mevcut | D022 işlem gerçekleşme ve veri kalite kontrolü | yFinance hacmiyle birlikte değerlendirilir; iki kaynak da eksikse açık durum | Negatif olmama, sıfır/eksik ve kaynaklar arası hacim bayrakları |
-| `index_code` | `END_ENDEKS_KODU` | `object` | Referans | Yanıtta eşlik eden endeks kodu | İlgili gün sonrasında mevcut; kullanım kararı verilmedi | Kabul testinde kullanılmıyor | Eksik olarak korunur | Kod sürekliliği ve tarih eşleşmesi |
-| `index_timestamp` | `END_TARIH` | `int64` | Referans | Endeks kaydının milisaniye epoch zaman damgası | İlgili gün sonrasında mevcut; kullanım kararı verilmedi | Kabul testinde kullanılmıyor | Eksikse endeks referansı kurulmaz | `date` ile yerel takvim uyumu |
-| `index_session` | `END_SEANS` | `int64` | Referans | Endeks seans kodu | İlgili gün sonrasında mevcut; kullanım kararı verilmedi | Kabul testinde kullanılmıyor | Eksik olarak korunur | Beklenen kod kümesi ve tarih tutarlılığı |
-| `index_value` | `END_DEGER` | `float64` | Referans | Eşlik eden endeks değeri | İlgili gün sonrasında mevcut; feature kararı verilmedi | Kabul testinde kullanılmıyor | Eksik olarak korunur | Pozitiflik ve endeks tarihiyle uyum |
+| `index_code` | `END_ENDEKS_KODU` | `object` | Referans | Hisse yanıtında eşlik eden endeks kodu; kabul panelinde literal `XU100` yerine `1` gözlendi | İlgili gün sonrasında yalnız kalite/çapraz kontrol için mevcut; feature veya fallback değildir | XU100 kimlik tutarlılığı denetimi; label/backtest fiyatı değildir | Eksik olarak korunur; doğrulanmış XU100 yerine kullanılmaz | Aynı gün hisseler arası kod tutarlılığı; literal `XU100` varsayılmaz |
+| `index_timestamp` | `END_TARIH` | `int64` | Referans | Hisse yanıtındaki endeks kaydının milisaniye epoch zaman damgası | İlgili gün sonrasında yalnız kalite/çapraz kontrol için mevcut; feature veya fallback değildir | Aynı gün farklı hisselerde tarih tutarlılığı denetimi | Eksikse END_* çapraz kontrolü kurulmaz; doğrulanmış XU100 etkilenmez | Hisse tarihi ve aynı gün diğer hisselerin END_* tarihiyle uyum |
+| `index_session` | `END_SEANS` | `int64` | Referans | Hisse yanıtında eşlik eden endeks seans kodu | İlgili gün sonrasında yalnız kalite/çapraz kontrol için mevcut; feature veya fallback değildir | Aynı gün farklı hisselerde seans tutarlılığı denetimi | Eksik olarak korunur; doğrulanmış XU100 yerine kullanılmaz | Aynı gün hisseler arası seans kodu tutarlılığı |
+| `index_value` | `END_DEGER` | `float64` | Referans | Hisse yanıtında eşlik eden endeks değeri | İlgili gün sonrasında yalnız kalite/çapraz kontrol için mevcut; feature veya fallback değildir | Aynı gün farklı hisselerde değer tutarlılığı ve doğrulanmış XU100 ile tanısal fark kontrolü | Eksik olarak korunur; market/relative feature'lar yalnız `validated_xu100_close` kullanır | Pozitiflik, tarih/seans uyumu ve aynı gün hisseler arası değer tutarlılığı |
 | `fx_currency_code` | `DD_DOVIZ_KODU` | `object` | Referans | Döviz kodu; gözlenen yanıtta `USD` | İlgili gün sonrasında mevcut; kullanım kararı verilmedi | Kabul testinde kullanılmıyor | Eksik olarak korunur | Beklenen para birimi kodu |
 | `fx_rate_type_code` | `DD_DT_KODU` | `object` | Referans | Döviz kuru tür kodu | İlgili gün sonrasında mevcut; kullanım kararı verilmedi | Kabul testinde kullanılmıyor | Eksik olarak korunur | Kod sürekliliği |
 | `fx_timestamp` | `DD_TARIH` | `int64` | Referans | Döviz kaydının milisaniye epoch zaman damgası | İlgili gün sonrasında mevcut; kullanım kararı verilmedi | Kabul testinde kullanılmıyor | Eksikse döviz referansı kurulmaz | `date` ile yerel takvim uyumu |
@@ -194,7 +196,7 @@ Referans tablosu yüklenirken her rejimin `[0.01, ∞)` fiyat aralığını boş
 | `ticker_mapping_version` | Mapping dosya adı/sürümü | Identity çözümünün referans sürümü | Lineage; feature yapılmaz |
 | `ticker_mapping_checksum` | Normalize mapping içeriğinin SHA-256 özeti | Aynı mapping'in yeniden üretilebilir kimliği | Lineage; feature yapılmaz |
 
-Identity-etkin yeni tam veri yolunda bu yedi alan clean ve label snapshot'larına taşınır; clean ve label satır kimliği/gruplaması `security_id + prediction_date` olur. Eski identity alanı içermeyen küçük snapshot'lar geriye uyumlu olarak `ticker + prediction_date` kullanmaya devam eder. Gelecekteki feature rolling hesapları `ticker` yerine `security_id` ile yapılmalı; mapping durumu, geçiş tarihi, güncel ticker ve resmî kaynak metadata'sı modele verilmemelidir.
+Identity-etkin yeni tam veri yolunda bu yedi alan clean ve label snapshot'larına taşınır; clean ve label satır kimliği/gruplaması `security_id + prediction_date` olur. Eski identity alanı içermeyen küçük snapshot'lar geriye uyumlu olarak `ticker + prediction_date` kullanmaya devam eder. `baseline_v1` feature rolling hesapları `ticker` yerine `security_id` ile yapılır; mapping durumu, geçiş tarihi, güncel ticker ve resmî kaynak metadata'sı modele verilmez.
 
 ## D022/D023/D026/D027 Temiz Snapshot Alanları
 

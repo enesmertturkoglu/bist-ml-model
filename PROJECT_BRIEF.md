@@ -14,7 +14,7 @@ Sistem her hisse için pozitif sınıf olasılığı üretecek ve hisseleri bu o
 
 - LightGBM Classifier
 - Model çıktısı: Her hisse için `P(+%5)` olasılığı
-- Günlük seçim: En yüksek olasılığa sahip ilk 5-10 hisse
+- Günlük seçim sayısı henüz kesinleşmemiştir; model hisseleri pozitif sınıf olasılığına göre sıralayacaktır.
 
 ## İlk Sürümün Kapsamı
 
@@ -90,9 +90,13 @@ Model ve tahmin kayıtları ilk sürümde MLflow gibi ek bir sistem yerine sade,
 
 Ana model dönemi `2020-03-13` tarihinde başlar. Standart normal adi paylarda tavan açılış `%10` marj ve içeri doğru fiyat adımı yuvarlamasıyla hesaplanır; baz fiyat ve açılış karşılaştırması yFinance nominal OHLC serisinden alınır.
 
-Hibrit fiyat hesabından vazgeçilmiş, bütün fiyat alanları için yFinance nominal OHLC tek kaynak olarak kesinleştirilmiş ve dayanıklı kaynak kabul koşusu `PASS` ile tamamlanmıştır. Sıradaki aşama veri toplama ve temizleme altyapısıdır.
+Hibrit fiyat hesabından vazgeçilmiş, bütün fiyat alanları için yFinance nominal OHLC tek kaynak olarak kesinleştirilmiş ve dayanıklı kaynak kabul koşusu `PASS` ile tamamlanmıştır.
 
-Gerçek kaynak sütunları ve fiyat normalizasyon alanları `DATA_DICTIONARY.md` içinde belgelenmiştir. Feature engineering aşaması henüz başlamadığı için model feature listesi henüz kesin değildir.
+Veri toplama ve değişmez snapshot altyapısı, temizleme, label üretimi, security identity/tarih-etkin ticker mapping, global BİST takvimi, bağımsız doğrulanmış XU100 ve feature pipeline tamamlanmıştır. `baseline_v1` tam 32 feature olarak kesinleştirilmiş ve uygulanmıştır.
+
+Gerçek kabul paneli 20 security × 39 seans = 780 satırla `PASS` tamamlanmıştır. Duplicate `security_id + prediction_date` ve sonsuz değer sayısı `0`, son seansta feature geçerliliği `%100` olmuştur.
+
+Sıradaki geliştirme LightGBM eğitim, walk-forward split ve model artifact altyapısıdır. Günlük prediction universe kuralı bu geliştirmeden önce kesinleştirilmesi gereken açık proje kararı olarak korunmaktadır.
 
 ## Sohbetler Arası Devir Standardı
 

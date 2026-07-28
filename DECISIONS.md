@@ -797,9 +797,11 @@ Sağlayıcı epoch timestamp'ini açık saat dilimi kanıtıyla çözmek tarih k
 
 ## Henüz Kesinleşmemiş Kararlar
 
+- Günlük prediction universe: `T` tarihinde hangi securities model tarafından puanlanacak? Kural T+1 `entry_eligible` veya gelecekteki başka bir işlem sonucunu kullanamaz; yalnız T ve geçmişte mevcut bilgiye dayanmalıdır.
 - Likidite filtresi
 - Günlük seçilecek hisse sayısı
 - Komisyon ve slippage varsayımları
+- İlk walk-forward test tarihi
 
 ## Yeni Karar Şablonu
 

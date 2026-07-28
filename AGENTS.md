@@ -113,4 +113,8 @@ Standart normal adi paylarda tavan açılış `%10` marj ve içeri doğru fiyat 
 
 Tek fiyat kaynaklı dayanıklı kabul koşusu eksiksiz gerçek veride `PASS` ile tamamlanmıştır.
 
-Sıradaki aşama veri toplama ve temizleme altyapısıdır.
+Veri toplama ve değişmez snapshot altyapısı, temizleme, üç BİST işlem günlük label pipeline'ı ve security identity/tarih-etkin ticker mapping tamamlanmıştır.
+
+D028 `baseline_v1` kataloğu tam 32 feature olarak kesinleştirilmiş; D029 bağımsız XU100, global BİST takvimi ve 32 feature pipeline'ı tamamlanmıştır. Regresyon paketi `257 passed` sonucunu vermektedir.
+
+Sıradaki teknik aşama LightGBM eğitim ve walk-forward altyapısıdır. Ancak T tarihinde hangi securities satırlarının puanlanacağını belirleyen günlük prediction universe kuralı henüz kesinleşmemiş bir proje kararıdır.

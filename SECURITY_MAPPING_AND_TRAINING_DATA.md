@@ -2,7 +2,7 @@
 
 `security_id`, bir şirket payını ticker değişse bile aynı tarihsel seri altında tutan kalıcı kimliktir. Provider'dan görülen gerçek kod `observed_ticker` olarak korunur; geçmiş kod güncel kodla değiştirilmez. Mapping dosyasında bulunmayan ticker otomatik ve deterministik kimlikle yeni security kabul edilir, veri akışı durmaz.
 
-İleride rolling feature hesapları `ticker` yerine `security_id` ile gruplanmalıdır. `current_ticker`, mapping durumu, geçiş tarihleri ve kaynak bilgileri feature değildir.
+`baseline_v1` rolling feature hesapları `ticker` yerine `security_id` ile gruplanır. `current_ticker`, mapping durumu, geçiş tarihleri ve kaynak bilgileri feature değildir.
 
 ## 2. Mapping dosyası nasıl güncellenir?
 
@@ -35,7 +35,7 @@ Birden fazla eski/güncel ticker için `--nominal-snapshot-id`, `--snapshot-set`
 
 ## 4. Mapping güncellenmezse ne olur?
 
-Yeni halka arz yeni security olarak alınır. Kod değiştirmiş fakat mapping'e eklenmemiş pay da geçici olarak yeni security olur ve eski tarihsel seriyle birleşmez. Mapping daha sonra düzeltildiğinde identity, clean, label ve ileride feature snapshot'ları yeniden üretilmeli; model yeni mapping sürümüyle yeniden eğitilmelidir. Eski snapshot'lar değiştirilmez.
+Yeni halka arz yeni security olarak alınır. Kod değiştirmiş fakat mapping'e eklenmemiş pay da geçici olarak yeni security olur ve eski tarihsel seriyle birleşmez. Mapping daha sonra düzeltildiğinde identity, clean, label ve feature snapshot'ları yeniden üretilmeli; model yeni mapping sürümüyle yeniden eğitilmelidir. Eski snapshot'lar değiştirilmez.
 
 ## 5. Kontrol listesi
 
