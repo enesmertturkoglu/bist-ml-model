@@ -4,11 +4,13 @@
 
 ## Mevcut Aşama
 
-D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiyat adımı, üç BİST işlem günlük label üretimi, D027 sade security kimliği/tarih-etkin ticker mapping altyapısı, D028 `baseline_v1` feature kataloğu/leakage sözleşmesi ve D029 güvenli XU100/global takvim/feature pipeline tamamlandı.
+D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiyat adımı, üç BİST işlem günlük label üretimi, D027 sade security kimliği/tarih-etkin ticker mapping, D028 `baseline_v1` feature kataloğu/leakage sözleşmesi ve D029 güvenli XU100/global takvim/feature pipeline tamamlandı. D030–D033 prediction universe, eğitim dataset'i, label availability/purge, expanding walk-forward, yalnız LightGBM baseline, metrik/calibration ve değişmez model artifact sözleşmelerini kesinleştirdi; bu altyapı uygulandı ve sentetik kabulden geçti.
 
 İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. İki kaynağın ham verileri birbirinden bağımsız `raw` snapshot'larda; yFinance nominal OHLC ise kaynak snapshot kimliğine bağlı ayrı `derived` katmanda saklanır. Canonical checksum, atomik yazma, manifest doğrulaması ve revision fark raporu eski snapshot'ların üzerine yazılmasını önler.
 
-`2026-07-27` gerçek feature kabul koşusu `2024-01-02`–`2024-02-23` döneminde 20 hisse ve 39 global seansla `PASS` tamamlandı. 780 tekil `security_id + prediction_date` satırında tam 32 feature üretildi; duplicate key ve sonsuz değer sayısı `0`, son seansta geçerli feature oranı `%100` oldu. Toplam missing oranı doğal 20 oturumluk warm-up dahil `%25.9615` ölçüldü. XU100 İstanbul çözümü 39/39 global seans ve `%100` yerel gece yarısı eşleşmesi verdi; UTC takvim adayı 31/39'da kaldı. END_* 20 hissede aynı gün değer/seans tutarlılığını `%100`, yFinance `XU100.IS` ise 39/39 gün overlap'i doğruladı; ikisi de fallback olarak kullanılmadı. Sıradaki karar adımı günlük prediction universe kuralının kesinleştirilmesidir; ardından sabit feature snapshot şemasıyla LightGBM eğitim, walk-forward fold ve model artifact altyapısı geliştirilecektir.
+`2026-07-27` gerçek feature kabul koşusu `2024-01-02`–`2024-02-23` döneminde 20 hisse ve 39 global seansla `PASS` tamamlandı. 780 tekil `security_id + prediction_date` satırında tam 32 feature üretildi; duplicate key ve sonsuz değer sayısı `0`, son seansta geçerli feature oranı `%100` oldu. Toplam missing oranı doğal 20 oturumluk warm-up dahil `%25.9615` ölçüldü. XU100 İstanbul çözümü 39/39 global seans ve `%100` yerel gece yarısı eşleşmesi verdi; UTC takvim adayı 31/39'da kaldı. END_* 20 hissede aynı gün değer/seans tutarlılığını `%100`, yFinance `XU100.IS` ise 39/39 gün overlap'i doğruladı; ikisi de fallback olarak kullanılmadı.
+
+`2026-07-28` model altyapısı kabulünde sentetik veriyle iki tam walk-forward fold, gerçek `LGBMClassifier`, deterministik tekrar, OOS şeması ve artifact idempotency doğrulandı. Mevcut gerçek 20×39 snapshot yalnız şema/join/leakage/prediction-universe kabulünde kullanıldı: 780 gözlem ve 780 feature satırı one-to-one birleşti, 20 security/39 oturumda duplicate veya tamamen kayıp feature satırı oluşmadı; ilk 20 oturumdaki 400 satır `INSUFFICIENT_HISTORY`, sonraki 380 satır `prediction_eligible=true` oldu. Evren OHLC kontrolü yalnız `yf_nominal_*` alanlarını kullandı ve yasak gelecek/label alanı taşımadı. Bu küçük panel 60 validation + 20 test için yetersiz olduğundan gerçek deney çalıştırılmadı ve `EXPERIMENT_LOG.md` oluşturulmadı.
 
 ## Tamamlananlar
 
@@ -156,6 +158,14 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Windows'ta Python 3.13 `tempfile.mkdtemp()` ile oluşan korumalı owner-only DACL'nin atomik taşıma sonrasında final snapshot'a taşındığı doğrulandı. Yeni snapshot geçici dizinleri mevcut ACL'leri değiştirmeden ebeveyn ACL'sini doğal olarak miras alır; atomik `replace` geçici `PermissionError` için ayrıca sınırlı retry yapar. Sayısal provider epoch alanları adlarına bakılarak tarihe çevrilmez ve ham integer olarak korunur.
 - XU100, takvim, 32 formül, exact-session gap, geç halka arz warm-up sınıflandırması, kesitsel warm-up aktarımı, ölçek invariance, RSI uçları, kesitsel tie/minimum, denylist, identity zorunluluğu, snapshot lineage/idempotence/revision ve atomik Windows yazımı testleri eklendi. Bütün regresyon paketi `257 passed` verdi.
 - Gerçek 20-hisse/39-seans feature paneli izole `data/feature_acceptance` kökünde `PASS` tamamlandı: feature snapshot `snap_e3683df176da46de_r0002_87cc72905794`, validated XU100 `snap_14c275baa535b404_r0002_a8c6a1b90a70`, global takvim `snap_e42ff764cc64d9b3_r0002_ad73402528fa`.
+- D030 prediction universe yalnız T ve geçmiş bilgiye bağlandı. Aktif master üyeliği, gerçek T gözlemi, nominal OHLC, işlem kanıtı, 21 global oturum, feature/XU100 varlığı ve tekil anahtar fail-closed uygulanır; duplicate feature koşuyu durdurur. Feature ve label join'i yalnız `security_id + prediction_date` one-to-one anahtarıyla yapılır.
+- Eğitim matrisi exact-order `baseline_v1` 32 feature allowlist'ine kilitlendi; eksikler `NaN` kalır. Kimlik, tarih, ticker, mapping, audit, snapshot, label, entry, T+1–T+3, target/action ve exit alanları model matrisine giremez.
+- Label availability global takvimde T sonrası üçüncü oturumla hesaplanır. Expanding walk-forward 60 validation/20 test oturumu, her blok başında retraining ve validation/test sınırlarında strict label purge uygular; tarihler setler arasında bölünmez, test early stopping'a verilmez.
+- D032 exact `LGBMClassifier` parametreleri merkezi config'e eklendi. Ham pozitif sınıf olasılığı, deterministik günlük rank, sınıflandırma/AUC/Brier/10-bin calibration ve coverage-aware Daily Precision@5/@10 fold ve birleşik OOS düzeyinde üretilir; tek sınıfta tanımsız metrikler `NA` kalır.
+- D033 dosya tabanlı registry, deterministic training fingerprint, atomik immutable experiment klasörü, fold model sürümleri, metadata/config/schema/fold/OOS çıktıları ve aynı fingerprint için idempotent reuse ile uygulandı. `models/` git dışında tutulur.
+- Sentetik 375 oturumluk veriyle iki tam baseline fold'un her birinde 60 validation/20 test oturumu ve ilk foldda warm-up/purge sonrası 252 fit oturumu doğrulandı. Ayrıca 80 oturum × 8 security hızlı pipeline kabulünde gerçek LightGBM aynı seed/girdide bit düzeyinde aynı skorları verdi ve ikinci koşu yeni artifact oluşturmadı. Bunlar yalnız altyapı kabulüdür, model performans deneyi değildir.
+- Gerçek 20×39 kabul snapshot'ında 44 bağlı snapshot bütünlükten geçti; 780 evren/feature satırı one-to-one eşleşti, duplicate key ve tamamen kayıp feature satırı `0`, eligible satır `380`, yalnız warm-up nedeniyle dışlanan satır `400` ölçüldü. Model eğitimi çalıştırılmadı.
+- Prediction universe, dataset/join, purge, fold, gerçek LightGBM, metrik/calibration, OOS şeması ve registry testleriyle birlikte bütün regresyon paketi `291 passed` verdi. LightGBM 4.7.0 yalnız geriye uyumlu `eval_set` argümanı için dört deprecation uyarısı üretti; test verisi eval setine verilmedi.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -174,7 +184,7 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 ## İlk Sürüm Hisse Evreni
 
 - Tarihsel veri evreni: Veri toplama başlangıcındaki mevcut aktif BİST şirket payları listesi bütün tarihsel veri döneminde sabit kullanılır.
-- Günlük prediction universe: T tarihinde hangi satırların model tarafından puanlanacağını belirleyen operasyonel kuraldır; henüz kesinleşmemiştir ve T+1 `entry_eligible` veya başka bir gelecek sonucuna dayanamaz.
+- Günlük prediction universe: D030 ile kesinleşmiştir. Ana aktif pay evrenindeki bir satır yalnız T gözlemi/geçerli nominal OHLC/işlem kanıtı, en az 21 global oturum geçmişi, tekil feature satırı, doğrulanmış XU100 oturumu ve bütünlük kontrolleriyle puanlanabilir; T+1 `entry_eligible` veya başka bir gelecek sonucu kullanılamaz.
 - Evren referansı: Veri toplama başlangıcındaki güncel aktif BİST şirket payları
 - Tarihsel kullanım: Aynı aktif liste bütün geçmiş veri dönemine uygulanacak
 - Kot dışı ve günümüzde aktif olmayan hisseler: İlk sürüme dahil edilmeyecek
@@ -201,11 +211,11 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Görevler
 
-1. Günlük prediction universe kuralını yalnız T ve geçmişte mevcut bilgiye dayanacak biçimde kesinleştir.
-2. `baseline_v1` snapshot şemasını kullanan yalnız LightGBM Classifier eğitim pipeline'ını uygula.
-3. D005'e uygun walk-forward split ve aynı tarihteki hisseleri birlikte tutan fold üretimini uygula.
-4. Model artifact/metadata kaydını D025'e göre feature snapshot ID/checksum ve sıralı feature şemasına bağla.
-5. İlk gerçek walk-forward tarihini kesinleştir ve deneyi `EXPERIMENT_LOG.md` içinde kaydet.
+1. Tam aktif BİST şirket payı evrenini ve tarih-etkin ticker mapping sürümünü dondur.
+2. `2020-03-13` sonrası tam raw, identity, clean, label, XU100 ve `baseline_v1` feature snapshot zincirini değişmez biçimde üret.
+3. Sınıf dağılımı ve fold feasibility raporunu üret; 21 oturum warm-up, en az 252 purged fit oturumu, 60 validation oturumu ve train/validation iki sınıf koşullarını ölç.
+4. İlk gerçek 20 oturumluk test başlangıç tarihini ayrı kararla kesinleştir.
+5. İlk gerçek walk-forward deneyinden hemen önce `EXPERIMENT_LOG.md` oluştur ve ardından deneyi çalıştır.
 
 ## Tamamlanan Ana Aşamalar
 
@@ -216,13 +226,15 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Feature kataloğu
 - XU100 ve global BİST takvimi
 - `baseline_v1` feature pipeline
+- Prediction universe ve training dataset
+- LightGBM eğitim ve walk-forward altyapısı
+- Model artifact registry ve OOS metrikleri
 
 ## Sıradaki Ana Aşamalar
 
-- Prediction universe kararının kesinleştirilmesi
-- LightGBM eğitim pipeline
-- Walk-forward fold üretimi
-- Model artifact kaydı
+- Tam aktif BİST veri ve mapping snapshot zinciri
+- Fold feasibility ve ilk gerçek test tarihi kararı
+- İlk gerçek LightGBM walk-forward deneyi
 - Backtest
 - Kontrollü deneyler
 - Paper trading
@@ -230,7 +242,6 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Açık Sorular
 
-- Günlük tahmin tarihinde T verisi geçersiz veya işlem kanıtı bulunmayan securities için prediction universe kuralı nasıl belirlenecek? Bu kural T+1 `entry_eligible` alanına dayanamaz.
 - Likidite filtresi nasıl belirlenecek?
 - Günlük kaç hisse seçilecek?
 - Komisyon ve slippage varsayımları ne olacak?

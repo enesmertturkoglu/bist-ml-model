@@ -795,9 +795,98 @@ Sağlayıcı epoch timestamp'ini açık saat dilimi kanıtıyla çözmek tarih k
 
 2026-07-27
 
+### D030 — Prediction Universe ve Eğitim Dataset Sözleşmesi
+
+**Karar:**
+
+Bir `security_id + prediction_date` satırı yalnız ana aktif BİST şirket payı evreninde bulunuyorsa, T tarihinde gerçek gözlemi ve geçerli yFinance nominal OHLC'si varsa, T günü pozitif İş Yatırım TL hacmi veya yFinance pay hacmiyle işlem kanıtlanıyorsa, en az 21 global BİST oturumluk geçmişi varsa, tekil `baseline_v1` feature satırı ve doğrulanmış XU100 oturumu bulunuyorsa ve bütün bağlı snapshot/veri bütünlüğü kontrolleri geçiyorsa `prediction_eligible=true` olabilir. Çıktı `prediction_eligible` ve `prediction_exclusion_reason` alanlarını taşır; desteklenen nedenler `NOT_IN_MASTER_UNIVERSE`, `NO_T_OBSERVATION`, `INVALID_T_OHLC`, `NO_TRADE_ON_T`, `MISSING_TRADE_EVIDENCE`, `INSUFFICIENT_HISTORY`, `MISSING_FEATURE_ROW`, `MISSING_XU100_SESSION` ve `DUPLICATE_FEATURE_ROW` olacaktır. Duplicate feature anahtarı satır düşürmeyle giderilmez; koşu açık hatayla durur.
+
+Evren yalnız T kapanışında mevcut T ve geçmiş bilgisinden oluşturulur. T+1 open/volume, `entry_eligible`, `entry_exclusion_reason`, `LIMIT_OPEN`, `CORPORATE_ACTION_WINDOW`, `target_hit`, `label`, `exit_price`, `yf_future_split_factor` ve diğer T+1–T+3 sonuç/action alanları evreni belirleyemez.
+
+Feature ve label yalnız `security_id + prediction_date` anahtarıyla ve one-to-one doğrulamayla birleştirilir. Eğitime yalnız eligible, `label_status` geçerli, `label in {0,1}`, `label_available_date <= as_of_date` ve şeması tam `baseline_v1` olan satırlar alınır. Model matrisi katalog/metadata sırasındaki tam 32 feature'dan oluşur; kimlik, ticker, tarih, mapping, snapshot, audit, label, entry, hedef, çıkış ve horizon alanları modele giremez. Eksik feature değerleri imputasyon yapılmadan `NaN` kalır.
+
+**Gerekçe:**
+
+Prediction ile sonradan gözlenen işlem/label uygunluğunu ayırmak canlı zamanda yeniden üretilebilir bir skor evreni sağlar. Tekil tarih-security anahtarı, exact feature allowlist'i ve fail-closed bütünlük kontrolleri hem yanlış birleşimi hem gelecek bilgisinin sessizce modele girmesini önler.
+
+**Etkilenen alanlar:**
+
+Aktif pay evreni, nominal OHLC ve hacim girdileri, feature/label join'i, eğitim dataset'i, leakage kontrolleri ve günlük skorlanacak satırlar.
+
+**Tarih:**
+
+2026-07-28
+
+### D031 — Global Takvim Tabanlı Label Availability ve Expanding Walk-Forward
+
+**Karar:**
+
+`label_available_date`, `prediction_date` sonrasındaki üçüncü D029 global BİST oturumudur; ticker içi satır `shift(3)` kullanılamaz. Her foldda `fit_row.label_available_date < validation_start_date` ve `validation_row.label_available_date < test_start_date` purge koşulları zorunludur.
+
+Walk-forward penceresi expanding training, 60 global oturum validation ve 20 global oturum test olarak uygulanır; her test bloğu başında model yeniden eğitilir. Validation eğitim geçmişinin zaman sıralı son bölümüdür. Aynı `prediction_date` içindeki bütün securities tek bir train, validation veya test grubunda kalır. Random split yasaktır ve test verisi early stopping veya parametre seçimi için kullanılamaz.
+
+İlk gerçek test tarihi bu kararla sabitlenmemiştir. Tam aktif BİST snapshot'ları üretildikten sonra 21 oturum warm-up, en az 252 purged fit oturumu, 60 validation oturumu, iki sınıf ve pozitif örnek dağılımını gösteren fold feasibility raporu hazırlanacak; tarih ayrı kararla kesinleşecektir.
+
+**Gerekçe:**
+
+Global takvim ve sıkı availability sınırları, üç oturumluk label sonucu henüz bilinmeyen satırların fit/validation'a sızmasını engeller. Tarih gruplarını bölmemek kesitsel gözlemlerin aynı bilgi anında kalmasını sağlar.
+
+**Etkilenen alanlar:**
+
+Label availability, eğitim satırı seçimi, fold üretimi, early stopping, OOS değerlendirme ve ilk gerçek deney hazırlığı.
+
+**Tarih:**
+
+2026-07-28
+
+### D032 — LightGBM Baseline, Olasılık, Sıralama ve Metrikler
+
+**Karar:**
+
+İlk baseline yalnız `LGBMClassifier` kullanır. Merkezi parametreler `objective=binary`, `boosting_type=gbdt`, `learning_rate=0.05`, `num_leaves=31`, `max_depth=6`, `min_data_in_leaf=100`, `n_estimators=1000`, `random_state=42`, `verbosity=-1`, `deterministic=true`, `force_col_wise=true`, `n_jobs=1`, `feature_fraction=1.0`, `bagging_fraction=1.0`, `bagging_freq=0`, `scale_pos_weight=1.0`, `is_unbalance=false` olacaktır. Early stopping yalnız validation üzerinde, `binary_logloss` ve 100 turla çalışır; varsayılan sınıflandırma eşiği `0.50`'dir. İlk baseline'da class weighting, grid search, Optuna, feature seçimi, ayrı calibration modeli veya threshold optimizasyonu yoktur.
+
+Ham pozitif sınıf skoru `predict_proba(X)[:,1]` ile üretilip `probability_up_5pct` olarak saklanır; kalibre edilmiş gerçek olasılık olduğu iddia edilmez. Günlük rank `probability_up_5pct DESC, security_id ASC` ile deterministiktir.
+
+Her fold ve birleşik OOS için Accuracy, Precision, Recall, F1, ROC-AUC, PR-AUC, confusion matrix, gerçek/tahmin pozitif oranı, Brier score, 10 quantile calibration bin ve ağırlıklı mutlak calibration farkı hesaplanır. Tek sınıfta tanımsız metrik `NA` olur. Daily Precision@5/@10 önce tüm eligible satırları sıralar; seçilen labelı `NA` satırın yerine alttan başka security almaz. Tarih çıktısı `requested_k`, `effective_k`, `selected_count`, `valid_label_count`, `positive_count`, `precision_at_k`, `label_coverage_at_k` alanlarını; ana özet tarihlerin macro ortalamasını ve ayrıca pooled sonucu taşır.
+
+OOS çıktı en az security/ticker/tarih, model/fold sürümü, ham skor, varsayılan sınıf, günlük rank, prediction eligibility/nedeni, label/durumu ve feature/label snapshot ID'lerini saklar. Test dönemindeki bütün eligible satırlar skorlanır; labelı geçersiz satır çıktıdan silinmez, yalnız metrikten çıkarılır.
+
+**Gerekçe:**
+
+Tek ve sabit baseline, model katkısını parametre araması veya kalibrasyon etkisiyle karıştırmadan ölçer. Tarih-bazlı ranking ve coverage-aware Precision@K, günlük karar kullanımını dürüst biçimde raporlar.
+
+**Etkilenen alanlar:**
+
+Merkezi config, LightGBM eğitimi, early stopping, OOS skor şeması, calibration ve performans raporları.
+
+**Tarih:**
+
+2026-07-28
+
+### D033 — Değişmez LightGBM Artifact Registry
+
+**Karar:**
+
+MLflow eklenmeyecek. Her deney `models/lightgbm/<experiment_id>/` altında metadata, effective config, feature schema, fold tanımları/metrikleri, birleşik OOS metrik/tahminleri ve her fold için ayrı `model.txt` ile fold metadata'sı taşıyan dosya tabanlı değişmez artifact olarak saklanacaktır. Fold model sürümü `<experiment_id>_fold_NNN` olur ve eski klasörlerin üzerine yazılmaz.
+
+Training fingerprint; kod commit SHA, config checksum, feature snapshot checksum, label snapshot checksum, feature katalog checksum, fold tanımları ve random seed'e deterministik olarak bağlanır. Aynı fingerprint'e ait tamamlanmış artifact varsa yeni klasör oluşturulmadan mevcut experiment idempotent döndürülür. Metadata; model/experiment sürümü ve zamanı, as-of ve dönem sınırları, son kullanılabilir label tarihi, snapshot ID/checksum'ları, sıralı feature adları, LightGBM parametreleri, seed, kod SHA, satır/sınıf dağılımı, fold tanımları, train/validation/OOS metrikleri ve fingerprint'i taşır.
+
+Sentetik ve küçük snapshot kabul koşuları gerçek model deneyi değildir; `EXPERIMENT_LOG.md` ilk gerçek walk-forward çalıştırılmadan hemen önce oluşturulacaktır.
+
+**Gerekçe:**
+
+Atomik ve immutable kayıt, aynı veri/config/kod bağlamını yeniden üretilebilir kılar; yarım veya aynı içerikli mükerrer model klasörlerinin sonuç geçmişini değiştirmesini engeller.
+
+**Etkilenen alanlar:**
+
+Model registry, artifact dosya yapısı, provenance, tekrar çalıştırma/idempotency ve deney kayıt süreci.
+
+**Tarih:**
+
+2026-07-28
+
 ## Henüz Kesinleşmemiş Kararlar
 
-- Günlük prediction universe: `T` tarihinde hangi securities model tarafından puanlanacak? Kural T+1 `entry_eligible` veya gelecekteki başka bir işlem sonucunu kullanamaz; yalnız T ve geçmişte mevcut bilgiye dayanmalıdır.
 - Likidite filtresi
 - Günlük seçilecek hisse sayısı
 - Komisyon ve slippage varsayımları

@@ -31,7 +31,26 @@ python scripts/generate_features.py --yfinance-raw-snapshot-id <YF_RAW_ID> --isy
 python scripts/validate_feature_snapshot.py --snapshot-id <FEATURE_SNAPSHOT_ID>
 ```
 
-Birden fazla eski/güncel ticker için `--nominal-snapshot-id`, `--snapshot-set`, `--isyatirim-raw-snapshot-id` ve `--yfinance-raw-snapshot-id` seçenekleri tekrarlanır. END_* kabul çapraz kontrolü istenirse `collect_xu100.py` komutuna en az 20 adet `--isyatirim-stock-snapshot-id` eklenir. Identity snapshot'taki mapping checksum'u clean, label ve feature metadata'sına taşınır. LightGBM model eğitim komutu henüz oluşturulmadı; bu aşama için komut uydurulmamalıdır.
+Birden fazla eski/güncel ticker için `--nominal-snapshot-id`, `--snapshot-set`, `--isyatirim-raw-snapshot-id` ve `--yfinance-raw-snapshot-id` seçenekleri tekrarlanır. END_* kabul çapraz kontrolü istenirse `collect_xu100.py` komutuna en az 20 adet `--isyatirim-stock-snapshot-id` eklenir. Identity snapshot'taki mapping checksum'u clean, label ve feature metadata'sına taşınır.
+
+D030 prediction universe, ana aktif pay listesini `security_id` üzerinden uygular; tarih-etkin identity satırı gerçek provider ticker'ını ve yFinance nominal OHLC'yi sağlar. Feature ve label birleşimi yalnız `security_id + prediction_date` one-to-one anahtarıyla yapılır.
+
+LightGBM eğitim girişi oluşturulmuştur; ancak tam aktif evren/mapping dondurulmadan ve fold feasibility raporuyla ilk gerçek test tarihi ayrı kararla kesinleşmeden gerçek deney çalıştırılmamalıdır. Hazır snapshot zincirinden sonra komut şablonu şöyledir:
+
+```powershell
+python scripts/train_lightgbm.py `
+  --yfinance-raw-snapshot-id <YF_RAW_ID> `
+  --isyatirim-raw-snapshot-id <IS_RAW_ID> `
+  --identity-snapshot-id <IDENTITY_SNAPSHOT_ID> `
+  --feature-snapshot-id <FEATURE_SNAPSHOT_ID> `
+  --label-snapshot-id <LABEL_SNAPSHOT_ID> `
+  --xu100-snapshot-id <XU100_SNAPSHOT_ID> `
+  --calendar-snapshot-id <CALENDAR_SNAPSHOT_ID> `
+  --as-of-date <AS_OF_DATE> `
+  --first-test-start-date <AYRI_KARARLA_KESINLESTIRILMIS_TARIH>
+```
+
+Her eski/güncel ticker için iki raw snapshot seçeneği tekrarlanır. Komut yalnız doğrulanmış `COMPLETE` snapshot'ları kabul eder; feature katalog checksum'u, label/feature checksum'ları, config, kod SHA, fold tanımları ve seed'i fingerprint'e bağlar. Aynı tamamlanmış fingerprint yeni klasör açmadan mevcut artifact'ı döndürür.
 
 ## 4. Mapping güncellenmezse ne olur?
 

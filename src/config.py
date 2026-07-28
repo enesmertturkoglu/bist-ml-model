@@ -112,6 +112,76 @@ class FeatureConfig:
 
 
 @dataclass(frozen=True)
+class ModelTrainingConfig:
+    """D030 LightGBM and walk-forward contract kept in one auditable config."""
+
+    model_family: str = "lightgbm"
+    training_window: str = "expanding"
+    validation_sessions: int = 60
+    test_sessions: int = 20
+    minimum_training_sessions: int = 252
+    label_horizon_sessions: int = 3
+    minimum_feature_history_sessions: int = 21
+    early_stopping_rounds: int = 100
+    early_stopping_metric: str = "binary_logloss"
+    classification_threshold: float = 0.50
+    calibration_bins: int = 10
+    artifact_root: Path = Path("models/lightgbm")
+    objective: str = "binary"
+    boosting_type: str = "gbdt"
+    learning_rate: float = 0.05
+    num_leaves: int = 31
+    max_depth: int = 6
+    min_data_in_leaf: int = 100
+    n_estimators: int = 1000
+    random_state: int = 42
+    verbosity: int = -1
+    deterministic: bool = True
+    force_col_wise: bool = True
+    n_jobs: int = 1
+    feature_fraction: float = 1.0
+    bagging_fraction: float = 1.0
+    bagging_freq: int = 0
+    scale_pos_weight: float = 1.0
+    is_unbalance: bool = False
+
+    @property
+    def lightgbm_parameters(self) -> dict[str, Any]:
+        """Return exactly the binding baseline LGBMClassifier parameters."""
+
+        return {
+            "objective": self.objective,
+            "boosting_type": self.boosting_type,
+            "learning_rate": self.learning_rate,
+            "num_leaves": self.num_leaves,
+            "max_depth": self.max_depth,
+            "min_data_in_leaf": self.min_data_in_leaf,
+            "n_estimators": self.n_estimators,
+            "random_state": self.random_state,
+            "verbosity": self.verbosity,
+            "deterministic": self.deterministic,
+            "force_col_wise": self.force_col_wise,
+            "n_jobs": self.n_jobs,
+            "feature_fraction": self.feature_fraction,
+            "bagging_fraction": self.bagging_fraction,
+            "bagging_freq": self.bagging_freq,
+            "scale_pos_weight": self.scale_pos_weight,
+            "is_unbalance": self.is_unbalance,
+        }
+
+    def checksum(self, algorithm: str = "sha256") -> str:
+        """Return a stable checksum of the complete training contract."""
+
+        encoded = json.dumps(
+            _json_ready(asdict(self)),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.new(algorithm, encoded).hexdigest()
+
+
+@dataclass(frozen=True)
 class MarketDataConfig:
     """Filesystem, date, checksum and provider settings for data collection."""
 
@@ -137,6 +207,7 @@ class MarketDataConfig:
     cleaning: CleaningConfig = field(default_factory=CleaningConfig)
     label: LabelConfig = field(default_factory=LabelConfig)
     feature: FeatureConfig = field(default_factory=FeatureConfig)
+    training: ModelTrainingConfig = field(default_factory=ModelTrainingConfig)
     isyatirim: ProviderRequestConfig = field(
         default_factory=lambda: ProviderRequestConfig(
             timeout_seconds=60.0,
