@@ -887,6 +887,30 @@ Model registry, artifact dosya yapısı, provenance, tekrar çalıştırma/idemp
 
 2026-07-28
 
+### D034 — Resmî Kaynaklı Aktif BİST Pay Evreni ve Mapping Freeze
+
+**Karar:**
+
+İlk sürüm aktif master evreni exact `as_of_date` ile dondurulacaktır. Ana resmî girdiler KAP `BIST Şirketleri` ile KAP `Pazarlar / Pay Piyasası` sayfalarıdır; Borsa İstanbul `İşlem Gören Şirketler` sayfası, Pay Piyasası kapsamı ve KAP şirket referansı için bağımsız çapraz kontroldür. Her kaynak yanıtı URL, UTC alım zamanı, as-of tarihi, ham içerik checksum'u, parser sürümü ve kod commit SHA ile değişmez raw snapshot olarak saklanır.
+
+Master evrene yalnız aktif KAP BIST şirketiyle eşleşen Pay Piyasası şirket payları alınır. ETF, yatırım fonu, borsa yatırım fonu, varant, sertifika, rüçhan hakkı kuponu, borçlanma aracı, kira sertifikası, yapılandırılmış ürün, endeks ve emtia ürünü hariçtir. Geçici olarak işlem görmeme tek başına master evrenden çıkarma nedeni değildir; T günündeki gerçek işlem kanıtı D030 prediction universe aşamasında ayrıca değerlendirilir. Aynı şirketin farklı işlem kodlu pay sınıfları ayrı `security_id` olarak korunur ve düşük hacim master evren filtresi yapılmaz.
+
+Ticker değişikliği yalnız resmî Borsa İstanbul veya KAP kanıtında eski ticker'ın son, yeni ticker'ın ilk geçerli işlem tarihi açıkça doğrulanırsa `CONFIRMED` mapping olabilir. Şirket/simge benzerliği, provider serisinin kesintisiz görünmesi veya birleşme/devamlılık varsayımı otomatik mapping kanıtı değildir. Belirsiz adaylar ana mapping CSV'sine yazılmaz; ayrı inceleme raporunda tutulur. Resmî tarihsel alias bulunmayan güncel ticker deterministik `AUTO_NEW_TICKER` kimliğiyle tek mevcut kodundan toplanır ve veri akışı engellenmez. ISIN tabanlı yeni kimlik sistemi oluşturulmaz.
+
+Aktif evren snapshot kimliği, içerik checksum'u, sürümü ve as-of tarihi eğitim girdisinde zorunludur. Identity snapshot yalnız tarih-etkin ticker/nominal OHLC çözümüdür ve master evren fallback'i olamaz. Aktif evren ve mapping checksum'ları training fingerprint ile model/fold metadata'sına bağlanır; bunlardan biri değişirse yeni eğitim fingerprint'i oluşur.
+
+**Gerekçe:**
+
+Resmî kaynak, exact tarih ve checksum bağı; evren seçimini tekrar üretilebilir ve denetlenebilir yapar. Şirket payı ile diğer araçların ayrılması, belirsiz alias'ların otomatik birleştirilmemesi ve identity/master sorumluluklarının ayrılması yanlış security birleşimi ile sessiz evren kayması riskini sınırlar.
+
+**Etkilenen alanlar:**
+
+Aktif pay referans verisi, resmî kaynak snapshot'ları, ticker mapping incelemesi, tarihsel veri toplama manifesti, prediction universe, training fingerprint, model provenance, veri sözlüğü ve işletim CLI'ları.
+
+**Tarih:**
+
+2026-07-29
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

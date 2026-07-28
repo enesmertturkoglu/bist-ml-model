@@ -1,0 +1,67 @@
+{
+  "active_universe_file_checksum": "1d134cb0a1adcb514144b01cdb4c7a18baf8a74ea9e200595f78ba8478af58c5",
+  "active_universe_snapshot_checksum": "ea35b5e422620fe9dfd6b86a254c6037af945330245290d9d0fc4acbbcda3d68",
+  "active_universe_snapshot_created": false,
+  "active_universe_snapshot_id": "snap_fb0011eaecf3b4b7_r0002_112665b37839",
+  "as_of_date": "2026-07-29",
+  "candidate_count": 894,
+  "confirmed_historical_ticker_mapping_count": 0,
+  "counts_by_exclusion_reason": {
+    "FUND": 30,
+    "NON_EQUITY_MARKET": 40,
+    "NOT_PAY_MARKET": 203
+  },
+  "counts_by_instrument_type": {
+    "CERTIFICATE": 1,
+    "EQUITY": 833,
+    "ETF": 30,
+    "FUND": 30
+  },
+  "counts_by_market": {
+    "ALT PAZAR": 49,
+    "ANA PAZAR": 268,
+    "PİYASA ÖNCESİ İŞLEM PLATFORMU": 19,
+    "YAKIN İZLEME PAZARI": 16,
+    "YILDIZ PAZAR": 269
+  },
+  "cross_check_mismatch_count": 0,
+  "duplicate_security_id_count": 0,
+  "duplicate_ticker_count": 0,
+  "excluded_count": 273,
+  "included_security_count": 621,
+  "manual_review_mapping_count": 0,
+  "missing_official_source_count": 0,
+  "source_snapshots": [
+    {
+      "content_checksum": "52021262a21695439b1d74285c3b868d4e5e5c46c063af5c4bf3774deefa8231",
+      "created": false,
+      "raw_content_checksum": "a0e12baa5907f2fab61440ec03f9e0ce479168d2d292c600e97c51cd84e9e509",
+      "snapshot_id": "snap_c6d6ce6146df0987_r0002_bff4872549b7",
+      "source_name": "KAP_BIST_COMPANIES"
+    },
+    {
+      "content_checksum": "5e3b817092b202c1b3ce345dc75b8dcf881dd62064812f953fe31f2a3083f5cb",
+      "created": false,
+      "raw_content_checksum": "3a75c47036eecc712c9c8c01a8c3c43a044680d0faed226d93186d6c25d559fd",
+      "snapshot_id": "snap_f7f52bcde0693887_r0002_e76d364dff14",
+      "source_name": "KAP_MARKETS"
+    },
+    {
+      "content_checksum": "6116d54e27fca0de62750676f91cf6d9904521b7de6fabd6289ca6952c0475d0",
+      "created": false,
+      "raw_content_checksum": "b11e8ae058c463d6dde840040d6990ed8bc478e64acddf77edf20783e2654a12",
+      "snapshot_id": "snap_d6e49d00c9846799_r0002_ad17585ed4dc",
+      "source_name": "KAP_ENDED_MEMBERS"
+    },
+    {
+      "content_checksum": "3b8b480df9ca9b4df6482d0381f056fcd23a7b4d3d92d15e4309d102632386f1",
+      "created": false,
+      "raw_content_checksum": "e07eb4e08cdb7eb3be740978e8a363a5024fe757eb6a9c3b14e899663e7f5d38",
+      "snapshot_id": "snap_c9a8959fe31ade5e_r0002_222a9059cfca",
+      "source_name": "BORSA_ISTANBUL_TRADED_COMPANIES"
+    }
+  ],
+  "ticker_mapping_checksum": "400935abc55b923b36004ee8407972fbd69dd39d59f95a970ad7577158d46819",
+  "ticker_mapping_version": "bist_security_ticker_map_v1",
+  "universe_version": "bist_active_universe_v1"
+}

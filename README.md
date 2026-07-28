@@ -6,12 +6,13 @@ BİST hisselerini, T+1 açılışından sonraki üç BİST işlem günü içinde
 
 ## Mevcut durum
 
-Veri toplama ve değişmez snapshot, temizleme ve uygunluk, üç işlem günlük label, security identity/tarih-etkin ticker mapping, doğrulanmış XU100, global BİST takvimi, tam 32 `baseline_v1` feature pipeline'ı ve leakage-safe LightGBM expanding walk-forward eğitim/artifact altyapısı tamamlandı. İlk gerçek model deneyi henüz çalıştırılmadı.
+Veri toplama ve değişmez snapshot, temizleme ve uygunluk, üç işlem günlük label, security identity/tarih-etkin ticker mapping, doğrulanmış XU100, global BİST takvimi, tam 32 `baseline_v1` feature pipeline'ı ve leakage-safe LightGBM expanding walk-forward eğitim/artifact altyapısı tamamlandı. Resmî kaynaklı `bist_active_universe_v1`, `2026-07-29` as-of tarihinde 621 security ile donduruldu. İlk gerçek model deneyi henüz çalıştırılmadı.
 
 ## Veri akışı
 
 ```text
 raw snapshots
+→ official active-universe snapshot
 → nominal/identity
 → cleaning
 → labels
@@ -41,8 +42,15 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
+## Aktif evren komutları
+
+```powershell
+python scripts/build_active_bist_universe.py --as-of-date 2026-07-29 --report-dir reports/universe
+python scripts/validate_active_bist_universe.py --snapshot-id <ACTIVE_UNIVERSE_SNAPSHOT_ID>
+python scripts/build_history_collection_manifest.py --active-universe-snapshot-id <ACTIVE_UNIVERSE_SNAPSHOT_ID> --start-date 2020-03-13 --end-date 2026-07-29 --output reports/universe/full_history_collection_manifest_v1.csv
+```
+
 ## Sıradaki aşama
 
-- Tam aktif BİST evreni ve mapping sürümünü dondurmak
 - `2020-03-13` sonrası tam snapshot zincirini üretmek
 - Sınıf dağılımı/fold feasibility raporundan sonra ilk gerçek test tarihini ayrı kararla kesinleştirmek
