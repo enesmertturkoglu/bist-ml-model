@@ -31,6 +31,10 @@ def _fingerprint(seed: int = 42) -> str:
         config_checksum="config",
         feature_snapshot_checksum="feature",
         label_snapshot_checksum="label",
+        active_universe_snapshot_id="active-universe",
+        active_universe_snapshot_checksum="active-checksum",
+        active_universe_version="bist_active_universe_v1",
+        active_universe_as_of_date="2026-07-29",
         feature_catalog_checksum="catalog",
         fold_definitions=[{"fold_id": "fold_001"}],
         random_seed=seed,
@@ -88,3 +92,26 @@ def test_changed_fingerprint_preserves_old_artifact(tmp_path) -> None:
 def test_fingerprint_binds_seed_and_fold_definitions() -> None:
     assert _fingerprint(42) == _fingerprint(42)
     assert _fingerprint(42) != _fingerprint(43)
+
+
+def test_fingerprint_changes_with_active_universe_checksum() -> None:
+    common = {
+        "code_commit_sha": "a" * 40,
+        "config_checksum": "config",
+        "feature_snapshot_checksum": "feature",
+        "label_snapshot_checksum": "label",
+        "active_universe_snapshot_id": "active-universe",
+        "active_universe_version": "bist_active_universe_v1",
+        "active_universe_as_of_date": "2026-07-29",
+        "feature_catalog_checksum": "catalog",
+        "fold_definitions": [{"fold_id": "fold_001"}],
+        "random_seed": 42,
+    }
+    first = training_fingerprint(
+        **common, active_universe_snapshot_checksum="active-a"
+    )
+    second = training_fingerprint(
+        **common, active_universe_snapshot_checksum="active-b"
+    )
+
+    assert first != second

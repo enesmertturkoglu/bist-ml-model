@@ -1,5 +1,11 @@
 """Data-access clients used by the project."""
 
+from .active_universe import (
+    ActiveUniverseError,
+    build_active_universe,
+    build_history_collection_manifest,
+    validate_active_universe_snapshot,
+)
 from .isyatirim_client import (
     ClientStats,
     IsYatirimClient,
@@ -65,6 +71,7 @@ from .yfinance_normalization import (
 )
 
 __all__ = [
+    "ActiveUniverseError",
     "ClientStats",
     "CleaningInputError",
     "CleaningRunResult",
@@ -93,6 +100,8 @@ __all__ = [
     "add_corporate_action_windows",
     "add_daily_corporate_action_signals",
     "build_clean_eligibility_frame",
+    "build_active_universe",
+    "build_history_collection_manifest",
     "build_three_day_target_labels",
     "calculate_raw_upper_limit",
     "calculate_upper_limit",
@@ -112,4 +121,5 @@ __all__ = [
     "summarize_cleaning",
     "summarize_labels",
     "validate_nominal_ohlc",
+    "validate_active_universe_snapshot",
 ]
