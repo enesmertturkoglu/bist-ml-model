@@ -18,7 +18,7 @@ Gerçek CSV'deki resmî kaynak alanları da doldurulmalıdır. Eski ve yeni tick
 
 ## 3. Yeni eğitim verisi nasıl çekilir?
 
-Aktif evren önce resmî kaynaklardan exact tarihle dondurulur. V1 kaynaklarında resmî tarihsel alias kanıtı bulunmadığında ana mapping CSV'si boş kalabilir; bu durum veri akışını durdurmaz ve güncel ticker `AUTO_NEW_TICKER` olarak planlanır. Alias benzerlikten türetilmez; `reports/universe/ticker_mapping_review_v1.csv` içindeki `NO_HISTORICAL_TICKER_FOUND` satırları ana mapping'e aktarılmaz. Bu inceleme durumu, ilgili payın hiç ticker değiştirmediğinin başarıyla doğrulandığı anlamına gelmez. Tam tarihsel veri toplama sırasında açıklanamayan seri başlangıcı, bitişi veya boşluğu görülürse ayrı resmî mapping incelemesi açılır; alias ancak eski/yeni ticker ve geçiş tarihleri KAP veya Borsa İstanbul kanıtıyla doğrulandıktan sonra ana mapping'e eklenir.
+Aktif evren ve mapping V1 dondurulmuştur. Resmî kaynaklı `bist_active_universe_v1`, exact `2026-07-29` tarihinde 621 security içerir. V1 kaynaklarında resmî tarihsel alias kanıtı bulunmadığından ana mapping CSV'si boş kalmıştır; bu durum veri akışını durdurmaz ve güncel ticker `AUTO_NEW_TICKER` olarak planlanır. Alias benzerlikten türetilmez; `reports/universe/ticker_mapping_review_v1.csv` içindeki `NO_HISTORICAL_TICKER_FOUND` satırları ana mapping'e aktarılmaz. Bu inceleme durumu, ilgili payın hiç ticker değiştirmediğinin başarıyla doğrulandığı anlamına gelmez. Tam tarihsel veri toplama sırasında açıklanamayan seri başlangıcı, bitişi veya boşluğu görülürse ayrı resmî mapping incelemesi açılır; alias ancak eski/yeni ticker ve geçiş tarihleri KAP veya Borsa İstanbul kanıtıyla doğrulandıktan sonra ana mapping'e eklenir.
 
 ```powershell
 python scripts/build_active_bist_universe.py `
@@ -38,12 +38,12 @@ python scripts/build_history_collection_manifest.py `
 Ardından manifestteki ticker/dönemler için mevcut aşamalar şu komutlarla çalıştırılır:
 
 ```powershell
-python scripts/collect_market_data.py THYAO --start-date 2020-03-13 --end-date 2026-07-27
+python scripts/collect_market_data.py THYAO --start-date 2020-03-13 --end-date <AS_OF_DATE>
 python scripts/resolve_security_identity.py --nominal-snapshot-id <NOMINAL_SNAPSHOT_ID>
 python scripts/clean_market_data.py --snapshot-set THYAO,<IS_RAW_ID>,<YF_RAW_ID>,<YF_NOMINAL_ID> --security-identity-snapshot-id <IDENTITY_SNAPSHOT_ID>
 python scripts/generate_labels.py --clean-snapshot-id <CLEAN_SNAPSHOT_ID>
 python scripts/build_global_calendar.py --isyatirim-raw-snapshot-id <IS_RAW_ID> --report reports/global_calendar.json
-python scripts/collect_xu100.py --start-date 2020-03-13 --end-date 2026-07-27 --global-calendar-snapshot-id <CALENDAR_SNAPSHOT_ID> --report reports/xu100_validation.json
+python scripts/collect_xu100.py --start-date 2020-03-13 --end-date <AS_OF_DATE> --global-calendar-snapshot-id <CALENDAR_SNAPSHOT_ID> --report reports/xu100_validation.json
 python scripts/generate_features.py --yfinance-raw-snapshot-id <YF_RAW_ID> --isyatirim-raw-snapshot-id <IS_RAW_ID> --identity-snapshot-id <IDENTITY_SNAPSHOT_ID> --xu100-snapshot-id <XU100_SNAPSHOT_ID> --calendar-snapshot-id <CALENDAR_SNAPSHOT_ID> --quality-report reports/baseline_v1_quality.csv
 python scripts/validate_feature_snapshot.py --snapshot-id <FEATURE_SNAPSHOT_ID>
 ```
@@ -52,7 +52,7 @@ Birden fazla eski/güncel ticker için `--nominal-snapshot-id`, `--snapshot-set`
 
 D030 prediction universe, ana aktif pay listesini `security_id` üzerinden uygular; tarih-etkin identity satırı gerçek provider ticker'ını ve yFinance nominal OHLC'yi sağlar. Feature ve label birleşimi yalnız `security_id + prediction_date` one-to-one anahtarıyla yapılır.
 
-LightGBM eğitim girişi oluşturulmuştur; ancak tam aktif evren/mapping dondurulmadan ve fold feasibility raporuyla ilk gerçek test tarihi ayrı kararla kesinleşmeden gerçek deney çalıştırılmamalıdır. Hazır snapshot zincirinden sonra komut şablonu şöyledir:
+Aktif evren ve mapping V1 artık dondurulmuştur. Gerçek eğitimin kalan ön koşulları `2020-03-13` sonrası tam raw, identity, clean, label, XU100 ve `baseline_v1` feature snapshot zinciri; sınıf dağılımı/fold feasibility raporu ve ilk gerçek test tarihinin ayrı kararla kesinleştirilmesidir. Bu ön koşullar tamamlanmadan gerçek LightGBM performans deneyi çalıştırılmamalıdır. Hazır snapshot zincirinden sonra komut şablonu şöyledir:
 
 ```powershell
 python scripts/train_lightgbm.py `

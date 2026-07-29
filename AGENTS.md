@@ -115,6 +115,25 @@ Tek fiyat kaynaklı dayanıklı kabul koşusu eksiksiz gerçek veride `PASS` ile
 
 Veri toplama ve değişmez snapshot altyapısı, temizleme, üç BİST işlem günlük label pipeline'ı ve security identity/tarih-etkin ticker mapping tamamlanmıştır.
 
-D028 `baseline_v1` kataloğu tam 32 feature olarak kesinleştirilmiş; D029 bağımsız XU100, global BİST takvimi ve 32 feature pipeline'ı tamamlanmıştır. Regresyon paketi `257 passed` sonucunu vermektedir.
+D028 `baseline_v1` kataloğu tam 32 feature olarak kesinleştirilmiş; D029 bağımsız XU100, global BİST takvimi ve 32 feature pipeline'ı tamamlanmıştır.
 
-Sıradaki teknik aşama LightGBM eğitim ve walk-forward altyapısıdır. Ancak T tarihinde hangi securities satırlarının puanlanacağını belirleyen günlük prediction universe kuralı henüz kesinleşmemiş bir proje kararıdır.
+D030 prediction universe ve training dataset tamamlanmıştır.
+
+D031 expanding 60-validation/20-test walk-forward ve label availability purge tamamlanmıştır.
+
+D032 LightGBM baseline, günlük sıralama ve metrikler tamamlanmıştır.
+
+D033 immutable model artifact registry tamamlanmıştır.
+
+D034 exact `2026-07-29` aktif BİST master evreni 621 security ile dondurulmuştur.
+
+Son doğrulanmış regresyon sonucu `306 passed` olmuştur. İlk gerçek LightGBM performans deneyi henüz yapılmamıştır.
+
+Sıradaki teknik aşama `2020-03-13` sonrası tam raw, identity, clean, label, XU100 ve `baseline_v1` feature snapshot zinciridir.
+
+Açık kararlar:
+
+- Likidite filtresi
+- Günlük seçim sayısı
+- Komisyon ve slippage varsayımları
+- İlk walk-forward test tarihi
