@@ -27,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--yfinance-raw-snapshot-id", action="append", required=True)
     parser.add_argument("--isyatirim-raw-snapshot-id", action="append", required=True)
     parser.add_argument("--identity-snapshot-id", required=True)
+    parser.add_argument("--active-universe-snapshot-id", required=True)
     parser.add_argument("--feature-snapshot-id", required=True)
     parser.add_argument("--label-snapshot-id", required=True)
     parser.add_argument("--xu100-snapshot-id", required=True)
@@ -51,6 +52,7 @@ def main() -> int:
         yfinance_raw_snapshot_ids=args.yfinance_raw_snapshot_id,
         isyatirim_raw_snapshot_ids=args.isyatirim_raw_snapshot_id,
         identity_snapshot_id=args.identity_snapshot_id,
+        active_universe_snapshot_id=args.active_universe_snapshot_id,
         feature_snapshot_id=args.feature_snapshot_id,
         xu100_snapshot_id=args.xu100_snapshot_id,
         calendar_snapshot_id=args.calendar_snapshot_id,
@@ -74,6 +76,8 @@ def main() -> int:
         label_snapshot_id=args.label_snapshot_id,
     )
     feature_meta = store.get_snapshot(args.feature_snapshot_id)
+    active_universe_meta = store.get_snapshot(args.active_universe_snapshot_id)
+    active_context = active_universe_meta.revision_context
     result = LightGBMWalkForwardPipeline(
         training,
         registry=ModelRegistry(args.models_root),
@@ -87,6 +91,12 @@ def main() -> int:
         feature_snapshot_checksum=feature_meta.content_checksum,
         label_snapshot_id=args.label_snapshot_id,
         label_snapshot_checksum=label_meta.content_checksum,
+        active_universe_snapshot_id=active_universe_meta.snapshot_id,
+        active_universe_snapshot_checksum=active_universe_meta.content_checksum,
+        active_universe_version=str(
+            active_universe_meta.request_parameters["universe_version"]
+        ),
+        active_universe_as_of_date=str(active_context["as_of_date"]),
         feature_catalog_checksum=catalog_file_checksum(args.feature_catalog),
     )
     print(

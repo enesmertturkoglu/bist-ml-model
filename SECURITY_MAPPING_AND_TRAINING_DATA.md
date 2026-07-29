@@ -18,7 +18,24 @@ Gerçek CSV'deki resmî kaynak alanları da doldurulmalıdır. Eski ve yeni tick
 
 ## 3. Yeni eğitim verisi nasıl çekilir?
 
-Aktif ticker listesini güncelledikten ve gerekiyorsa mapping CSV'sini elle doğruladıktan sonra mevcut aşamalar şu komutlarla çalıştırılır:
+Aktif evren önce resmî kaynaklardan exact tarihle dondurulur. V1 kaynaklarında resmî tarihsel alias kanıtı bulunmadığında ana mapping CSV'si boş kalabilir; bu durum veri akışını durdurmaz ve güncel ticker `AUTO_NEW_TICKER` olarak planlanır. Alias benzerlikten türetilmez; `reports/universe/ticker_mapping_review_v1.csv` içindeki `NO_HISTORICAL_TICKER_FOUND` satırları ana mapping'e aktarılmaz. Bu inceleme durumu, ilgili payın hiç ticker değiştirmediğinin başarıyla doğrulandığı anlamına gelmez. Tam tarihsel veri toplama sırasında açıklanamayan seri başlangıcı, bitişi veya boşluğu görülürse ayrı resmî mapping incelemesi açılır; alias ancak eski/yeni ticker ve geçiş tarihleri KAP veya Borsa İstanbul kanıtıyla doğrulandıktan sonra ana mapping'e eklenir.
+
+```powershell
+python scripts/build_active_bist_universe.py `
+  --as-of-date <YYYY-MM-DD> `
+  --report-dir reports/universe
+
+python scripts/validate_active_bist_universe.py `
+  --snapshot-id <ACTIVE_UNIVERSE_SNAPSHOT_ID>
+
+python scripts/build_history_collection_manifest.py `
+  --active-universe-snapshot-id <ACTIVE_UNIVERSE_SNAPSHOT_ID> `
+  --start-date 2020-03-13 `
+  --end-date <AS_OF_DATE> `
+  --output reports/universe/full_history_collection_manifest_v1.csv
+```
+
+Ardından manifestteki ticker/dönemler için mevcut aşamalar şu komutlarla çalıştırılır:
 
 ```powershell
 python scripts/collect_market_data.py THYAO --start-date 2020-03-13 --end-date 2026-07-27
@@ -42,6 +59,7 @@ python scripts/train_lightgbm.py `
   --yfinance-raw-snapshot-id <YF_RAW_ID> `
   --isyatirim-raw-snapshot-id <IS_RAW_ID> `
   --identity-snapshot-id <IDENTITY_SNAPSHOT_ID> `
+  --active-universe-snapshot-id <ACTIVE_UNIVERSE_SNAPSHOT_ID> `
   --feature-snapshot-id <FEATURE_SNAPSHOT_ID> `
   --label-snapshot-id <LABEL_SNAPSHOT_ID> `
   --xu100-snapshot-id <XU100_SNAPSHOT_ID> `
@@ -50,7 +68,7 @@ python scripts/train_lightgbm.py `
   --first-test-start-date <AYRI_KARARLA_KESINLESTIRILMIS_TARIH>
 ```
 
-Her eski/güncel ticker için iki raw snapshot seçeneği tekrarlanır. Komut yalnız doğrulanmış `COMPLETE` snapshot'ları kabul eder; feature katalog checksum'u, label/feature checksum'ları, config, kod SHA, fold tanımları ve seed'i fingerprint'e bağlar. Aynı tamamlanmış fingerprint yeni klasör açmadan mevcut artifact'ı döndürür.
+Her eski/güncel ticker için iki raw snapshot seçeneği tekrarlanır. Komut yalnız doğrulanmış `COMPLETE` snapshot'ları kabul eder; feature katalog checksum'u, label/feature checksum'ları, aktif evren snapshot ID/checksum/sürüm/as-of alanları, config, kod SHA, fold tanımları ve seed'i fingerprint'e bağlar. Identity snapshot master evren yerine kullanılamaz. Aynı tamamlanmış fingerprint yeni klasör açmadan mevcut artifact'ı döndürür.
 
 ## 4. Mapping güncellenmezse ne olur?
 

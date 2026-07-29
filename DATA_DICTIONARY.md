@@ -22,7 +22,7 @@ data/
 ```
 
 - `raw`: Sağlayıcı alanları ve değerleri değiştirilmeden saklanır. yFinance tarih indeksi yalnız serializasyon için yerel `date` sütununa taşınır ve istek tickera `ticker` kimliği eklenir. İş Yatırım'ın kabul edilmiş yardımcı alanları aynı ham frame içinde korunur.
-- `derived`: Ham veriyle karışmayan dönüşüm çıktılarıdır. `yfinance/nominal_ohlc` D024 nominal OHLC ve split-normalizasyon denetim alanlarını; `security_identity/nominal_ohlc` D027 security birleştirmesini; `cleaning/market_data_eligibility` D022/D023 temizleme, kalite ve işlem uygunluğu alanlarını; `isyatirim/global_bist_sessions` gözlenen global takvimi; `benchmark/validated_xu100_close` doğrulanmış benchmark'ı; `features/baseline_v1` sıralı 32 feature'ı içerir. Her türetilmiş snapshot kaynak ham/türetilmiş snapshot'larına `input_snapshot_ids` ile bağlanır.
+- `derived`: Ham veriyle karışmayan dönüşüm çıktılarıdır. `yfinance/nominal_ohlc` D024 nominal OHLC ve split-normalizasyon denetim alanlarını; `security_identity/nominal_ohlc` D027 security birleştirmesini; `cleaning/market_data_eligibility` D022/D023 temizleme, kalite ve işlem uygunluğu alanlarını; `isyatirim/global_bist_sessions` gözlenen global takvimi; `benchmark/validated_xu100_close` doğrulanmış benchmark'ı; `features/baseline_v1` sıralı 32 feature'ı; `universe/active_bist_equities` ise exact as-of aktif şirket payı master evrenini içerir. Her türetilmiş snapshot kaynak ham/türetilmiş snapshot'larına `input_snapshot_ids` ile bağlanır.
 - `manifests`: Commit edilmiş snapshot kayıtları ile gerçek sağlayıcı revision farklarını tutar. Geçici `.snapshot-tmp-*` dosya veya dizinleri manifest kaydı olmadan geçerli snapshot sayılmaz.
 
 Snapshot verileri ek bir Parquet bağımlılığı gerektirmeyen `canonical-jsonl-v1` biçiminde saklanır. Checksum öncesinde sütun ve satır sırası, tarih, sayısal değer ve null gösterimi deterministik hale getirilir. Varsayılan algoritma `sha256`dır. Fiziksel veri ve metadata önce aynı dosya sisteminde geçici dizine yazılır, ardından atomik olarak son değişmez dizinine taşınır; manifest atomik olarak son commit sınırıdır.
@@ -418,9 +418,28 @@ Feature metadata/provenance alanları:
 
 Per-row 32 ayrı missing-reason sütunu üretilmez. `NaN` imputasyon yapılmadan korunur; sonsuz sonuçlar `NaN` yapılır ve kalite özetinde sayılır.
 
+## D034 Aktif BİST Pay Evreni Alanları
+
+`reference_data/bist_active_universe_v1.csv`, KAP BIST Şirketleri ile KAP Pazarlar verisinin exact `as_of_date` kesitinden üretilir. KAP üyeliği sona eren şirketler hariç tutulur; Borsa İstanbul İşlem Gören Şirketler sayfasının Pay Piyasası ve KAP referansı çapraz kontrol olarak saklanır. Her ham HTML yanıtı `official_reference/active_universe_source_html` raw snapshot'ında source URL, as-of, ham içerik checksum'u, parser sürümü ve kod SHA ile korunur.
+
+| Alan | Kaynak/formül | Anlam | Leakage/model kuralı |
+| --- | --- | --- | --- |
+| `universe_version` | Sabit `bist_active_universe_v1` | Aktif master evren sürümü | Model feature'ı değildir |
+| `as_of_date` | CLI exact tarih girdisi | Kaynak kesitinin tarihi | Tarihsel membership point-in-time iddiası değildir |
+| `security_id` | `generate_security_id(current_ticker)`; doğrulanmış alias varsa aynı kalıcı kimlik | Snapshot tekil anahtarı | Kimliktir, feature değildir |
+| `current_ticker` | KAP Pazarlar `stockCode` | As-of tarihteki işlem kodu | Provider sınırında `.IS` eklenebilir; feature değildir |
+| `company_name` | KAP Pazarlar `title` | Resmî şirket/pay adı | Feature değildir |
+| `market_group`, `market_name` | KAP `financialMarketName`, `marketName` | Pay Piyasası ve alt pazar üyeliği | Likidite veya model sinyali yapılmaz |
+| `instrument_type` | KAP şirket üyeliği, `fundOid`, pazar ve resmî ad sınıflaması | `EQUITY` dahil; fon/ETF/sertifika vb. audit'te hariç | Yalnız evren kapsamı |
+| `is_active`, `include_in_v1` | Resmî active-company + Pay Piyasası eşleşmesi | V1 master üyeliği | D030 ön koşuludur; T+1 sonucu kullanmaz |
+| `official_source_name/reference/date/url` | KAP pazar kaydı | Satır bazlı resmî provenance | Feature değildir |
+| `source_record_checksum` | Canonical kaynak kayıt SHA-256 | Satır kaynağının değişim bağı | Feature değildir |
+
+Derived snapshot `source=universe`, `dataset_type=active_bist_equities`, `layer=derived`, `ticker_or_instrument=BIST_ACTIVE_EQUITIES` kimliğini taşır. Metadata `input_snapshot_ids`, `input_content_checksums`, `active_universe_file_checksum`, `ticker_mapping_version`, `ticker_mapping_checksum`, `as_of_date`, `parser_version`, `code_commit_sha`, `included_security_count` ve `excluded_candidate_count` alanlarına bağlanır. Anahtar `security_id` tekildir; aynı içerik ve bağlam idempotent, kaynak/checksum bağlamı değişirse yeni revision'dır.
+
 ## D030 Prediction Universe ve Eğitim Dataset Alanları
 
-Prediction universe anahtarı `security_id + prediction_date` olur. Aktif master evreni sabit security listesi veya aynı anahtarı taşıyan tarih-etkin üyelik tablosu olarak verilebilir; duplicate master/observation/feature anahtarı açık hatadır.
+Prediction universe anahtarı `security_id + prediction_date` olur. Üretim assembler'ı `active_universe_snapshot_id` olmadan çalışmaz ve master üyeliği yalnız doğrulanmış `universe/active_bist_equities/derived` snapshot'ındaki tekil `security_id` listesinden alır. Identity snapshot yalnız ticker ve nominal OHLC çözümüdür; master evren fallback'i olamaz. Sentetik testler master security listesini açık fixture olarak verir. Duplicate master/observation/feature anahtarı açık hatadır.
 
 | Alan | Kaynak/formül | Anlam | Leakage/model kuralı |
 | --- | --- | --- | --- |
@@ -430,6 +449,9 @@ Prediction universe anahtarı `security_id + prediction_date` olur. Aktif master
 | `label_available_date` | T sonrasındaki üçüncü global BİST oturumu | Labelın as-of zamanda bilindiği ilk tarih | Ticker satır `shift(3)` kullanılmaz |
 | `feature_snapshot_id` | Doğrulanmış feature girdisi | Satırın feature provenance bağı | Model feature'ı değildir |
 | `label_snapshot_id` | Doğrulanmış label girdisi | Satırın label provenance bağı | Model feature'ı değildir |
+| `active_universe_snapshot_id` | Doğrulanmış D034 master snapshot | Eğitim/prediction master üyelik bağı | Zorunlu provenance; feature değildir |
+| `active_universe_snapshot_checksum` | Master snapshot içerik checksum'u | Evren değişimini training fingerprint'e bağlar | Değişirse yeni fingerprint |
+| `active_universe_version`, `active_universe_as_of_date` | Snapshot request/revision context | Dondurulan evren sürümü ve exact tarihi | Model feature'ı değildir |
 
 T-günü OHLC geçerliliği yalnız identity snapshot'taki `yf_nominal_open/high/low/close` ile kontrol edilir. İşlem kanıtı raw İş Yatırım `HGDG_HACIM → is_tl_volume` veya raw yFinance `Volume → yf_share_volume` pozitifliğidir; ikisi de yoksa `MISSING_TRADE_EVIDENCE`, ikisi de mevcut ve sıfırsa `NO_TRADE_ON_T` üretilir. Bu OHLC/hacim alanları evren audit girdileridir, 32 feature model matrisine eklenmez.
 
@@ -473,4 +495,4 @@ OOS minimum şeması:
 
 Daily Precision@K tarih satırı `requested_k`, `effective_k`, `selected_count`, `valid_label_count`, `positive_count`, `precision_at_k` ve `label_coverage_at_k` alanlarını taşır. Önce seçim yapılır; seçilmiş `NA` label yerine alt ranktan satır alınmaz.
 
-`models/lightgbm/<experiment_id>/metadata.json` ve fold metadata'sı model/fold sürümü, UTC eğitim zamanı, as-of/dönem sınırları, son kullanılabilir label tarihi, feature/label snapshot ID ve checksum'ları, feature katalog checksum'u, sıralı 32 feature, effective LightGBM parametreleri, random seed, kod commit SHA, satır/sınıf oranları, fold tanımları, train/validation/OOS metrikleri ve `training_fingerprint` alanlarını saklar. Fingerprint kod SHA + config checksum + feature/label snapshot checksum'ları + katalog checksum + fold tanımları + seed bağlamıdır. Artifact klasörü atomik ve değişmezdir; aynı tamamlanmış fingerprint mevcut experiment'ı döndürür.
+`models/lightgbm/<experiment_id>/metadata.json` ve fold metadata'sı model/fold sürümü, UTC eğitim zamanı, as-of/dönem sınırları, son kullanılabilir label tarihi, feature/label snapshot ID ve checksum'ları, aktif evren snapshot ID/checksum/sürüm/as-of alanları, feature katalog checksum'u, sıralı 32 feature, effective LightGBM parametreleri, random seed, kod commit SHA, satır/sınıf oranları, fold tanımları, train/validation/OOS metrikleri ve `training_fingerprint` alanlarını saklar. Fingerprint kod SHA + config checksum + feature/label snapshot checksum'ları + aktif evren kimliği/checksum/sürüm/as-of + katalog checksum + fold tanımları + seed bağlamıdır. Artifact klasörü atomik ve değişmezdir; aynı tamamlanmış fingerprint mevcut experiment'ı döndürür.

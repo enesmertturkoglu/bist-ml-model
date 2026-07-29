@@ -1,10 +1,10 @@
 # PROJECT STATUS
 
-**Son güncelleme:** 2026-07-28
+**Son güncelleme:** 2026-07-29
 
 ## Mevcut Aşama
 
-D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiyat adımı, üç BİST işlem günlük label üretimi, D027 sade security kimliği/tarih-etkin ticker mapping, D028 `baseline_v1` feature kataloğu/leakage sözleşmesi ve D029 güvenli XU100/global takvim/feature pipeline tamamlandı. D030–D033 prediction universe, eğitim dataset'i, label availability/purge, expanding walk-forward, yalnız LightGBM baseline, metrik/calibration ve değişmez model artifact sözleşmelerini kesinleştirdi; bu altyapı uygulandı ve sentetik kabulden geçti.
+D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiyat adımı, üç BİST işlem günlük label üretimi, D027 sade security kimliği/tarih-etkin ticker mapping, D028 `baseline_v1` feature kataloğu/leakage sözleşmesi ve D029 güvenli XU100/global takvim/feature pipeline tamamlandı. D030–D033 prediction universe, eğitim dataset'i, label availability/purge, expanding walk-forward, yalnız LightGBM baseline, metrik/calibration ve değişmez model artifact sözleşmelerini kesinleştirdi; bu altyapı uygulandı ve sentetik kabulden geçti. D034 ile resmî kaynaklı aktif BİST şirket payı evreni exact `2026-07-29` tarihinde donduruldu ve üretim training akışı açık master-evren snapshot'ına bağlandı.
 
 İlk sürümde tüm OHLC fiyatları yFinance'tan alınacak ve split verileriyle dönemin nominal ölçeğine dönüştürülecek. İş Yatırım ana işlem takvimi, TL hacmi, endeks ve yardımcı veriler için kullanılmaya devam edecek. İki kaynağın ham verileri birbirinden bağımsız `raw` snapshot'larda; yFinance nominal OHLC ise kaynak snapshot kimliğine bağlı ayrı `derived` katmanda saklanır. Canonical checksum, atomik yazma, manifest doğrulaması ve revision fark raporu eski snapshot'ların üzerine yazılmasını önler.
 
@@ -167,6 +167,11 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Python çalışma zamanı bağımlılıkları `requirements.txt`, test bağımlılıkları `requirements-dev.txt` içinde kabul ortamında doğrulanan tam sürümlerle sabitlendi; LightGBM baseline sürümü açıkça `4.7.0` olarak tanımlandı.
 - Gerçek 20×39 kabul snapshot'ında 44 bağlı snapshot bütünlükten geçti; 780 evren/feature satırı one-to-one eşleşti, duplicate key ve tamamen kayıp feature satırı `0`, eligible satır `380`, yalnız warm-up nedeniyle dışlanan satır `400` ölçüldü. Model eğitimi çalıştırılmadı.
 - Prediction universe, dataset/join, purge, fold, gerçek LightGBM, metrik/calibration, OOS şeması ve registry testleriyle birlikte bütün regresyon paketi `291 passed` verdi. LightGBM 4.7.0'ın `eval_X`/`eval_y` arayüzü kullanılır; yalnız validation verisi early stopping'e verilir ve test verisi eval girdisine girmez.
+- PR #2 `main` branch'ine merge edildi (`0abb255`). Ardından D034 aktif evren koşusu KAP BIST Şirketleri, KAP Pazarlar, KAP üyeliği sona eren şirketler ve Borsa İstanbul İşlem Gören Şirketler kaynaklarıyla `2026-07-29` as-of tarihinde tamamlandı: 894 adaydan 621 ayrı security dahil, 273 aday gerekçeli hariç; duplicate ticker/security, eksik resmî kaynak ve çapraz-kontrol uyuşmazlığı `0` oldu.
+- Aktif evren `reference_data/bist_active_universe_v1.csv` içinde `1d134cb0a1adcb514144b01cdb4c7a18baf8a74ea9e200595f78ba8478af58c5` checksum'u ile sürümlendi. Parser/training provenance commit'i `f968f6d` ile üretilen derived `universe/active_bist_equities` snapshot'ı `snap_fb0011eaecf3b4b7_r0002_112665b37839`, içerik checksum'u `ea35b5e422620fe9dfd6b86a254c6037af945330245290d9d0fc4acbbcda3d68` oldu; ikinci gerçek koşu dört raw kaynak ve derived evren için aynı kimlikleri `created=false` döndürdü.
+- V1 resmî girdilerinde tarihsel ticker geçiş kanıtı bulunmadığından ana mapping dosyasına varsayımsal alias eklenmedi; doğrulanmış tarihsel mapping sayısı `0`, `NEEDS_MANUAL_REVIEW` sayısı `0` ve 621 güncel ticker için durum `NO_HISTORICAL_TICKER_FOUND` olarak ayrı inceleme raporuna yazıldı. Bu durum “hiç ticker değişmedi” doğrulaması değildir. Veri akışı her güncel ticker'ı `AUTO_NEW_TICKER` kuralıyla engellemeden planladı; tam veri toplamada görülebilecek açıklanamayan tarihsel seri başlangıcı, bitişi veya boşluğu ileride resmî KAP/Borsa İstanbul kanıtı aranan mapping incelemesini başlatacaktır.
+- `2020-03-13`–`2026-07-29` tarihsel toplama manifesti 621 satırla üretildi. Prediction universe üretim assembler'ındaki identity-master fallback kaldırıldı; aktif evren snapshot ID/checksum/sürüm/as-of alanları training fingerprint ve model metadata'sına zorunlu provenance olarak eklendi.
+- Aktif evren fixture/parser, şirket payı kapsamı, duplicate, ayrı pay sınıfı, geçici işlem görmeme, sona eren üyelik, provenance, snapshot revision/idempotency, mapping review, collection manifest ve production master-snapshot zorunluluğu testleri eklendi. Tam regresyon `306 passed`; `compileall`, `pip check` ve `git diff --check` başarılı tamamlandı.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -194,6 +199,8 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Kod eşleştirme kaynağı: Borsa İstanbul ve gerektiğinde KAP
 - Finansal araç kapsamı: Yalnızca şirket payları
 - Bilinen sınırlama: Survivorship bias
+- Dondurulmuş aktif evren: `bist_active_universe_v1`, as-of `2026-07-29`, 621 security
+- Aktif evren snapshot: `snap_fb0011eaecf3b4b7_r0002_112665b37839`
 - Sonuçların yorumu: Tam point-in-time backtest değildir
 - Gelecek geliştirme: Point-in-time tarihsel evrenle karşılaştırmalı deney
 
@@ -212,11 +219,10 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Görevler
 
-1. Tam aktif BİST şirket payı evrenini ve tarih-etkin ticker mapping sürümünü dondur.
-2. `2020-03-13` sonrası tam raw, identity, clean, label, XU100 ve `baseline_v1` feature snapshot zincirini değişmez biçimde üret.
-3. Sınıf dağılımı ve fold feasibility raporunu üret; 21 oturum warm-up, en az 252 purged fit oturumu, 60 validation oturumu ve train/validation iki sınıf koşullarını ölç.
-4. İlk gerçek 20 oturumluk test başlangıç tarihini ayrı kararla kesinleştir.
-5. İlk gerçek walk-forward deneyinden hemen önce `EXPERIMENT_LOG.md` oluştur ve ardından deneyi çalıştır.
+1. `2020-03-13` sonrası tam raw, identity, clean, label, XU100 ve `baseline_v1` feature snapshot zincirini değişmez biçimde üret.
+2. Sınıf dağılımı ve fold feasibility raporunu üret; 21 oturum warm-up, en az 252 purged fit oturumu, 60 validation oturumu ve train/validation iki sınıf koşullarını ölç.
+3. İlk gerçek 20 oturumluk test başlangıç tarihini ayrı kararla kesinleştir.
+4. İlk gerçek walk-forward deneyinden hemen önce `EXPERIMENT_LOG.md` oluştur ve ardından deneyi çalıştır.
 
 ## Tamamlanan Ana Aşamalar
 
@@ -230,10 +236,11 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Prediction universe ve training dataset
 - LightGBM eğitim ve walk-forward altyapısı
 - Model artifact registry ve OOS metrikleri
+- Resmî kaynaklı aktif BİST pay evreni, audit, mapping review ve toplama manifesti
 
 ## Sıradaki Ana Aşamalar
 
-- Tam aktif BİST veri ve mapping snapshot zinciri
+- `2020-03-13` sonrası tam tarihsel snapshot zinciri
 - Fold feasibility ve ilk gerçek test tarihi kararı
 - İlk gerçek LightGBM walk-forward deneyi
 - Backtest

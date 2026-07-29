@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.data.active_universe import validate_active_universe_snapshot
 from src.data.security_identity import normalize_ticker
 from src.data.snapshot_store import SnapshotMetadata, SnapshotStore
 from src.features.catalog import BASELINE_V1_FEATURES, catalog_file_checksum
@@ -365,11 +366,17 @@ class PredictionUniverseInputAssembler:
         yfinance_raw_snapshot_ids: Sequence[str],
         isyatirim_raw_snapshot_ids: Sequence[str],
         identity_snapshot_id: str,
+        active_universe_snapshot_id: str,
         feature_snapshot_id: str,
         xu100_snapshot_id: str,
         calendar_snapshot_id: str,
         minimum_history_sessions: int = 21,
     ) -> PredictionUniverseAssembly:
+        if not str(active_universe_snapshot_id).strip():
+            raise PredictionUniverseError("active_universe_snapshot_id is required")
+        active_meta = validate_active_universe_snapshot(
+            self.snapshot_store, active_universe_snapshot_id
+        )
         if not yfinance_raw_snapshot_ids or not isyatirim_raw_snapshot_ids:
             raise PredictionUniverseError("raw yFinance and İş Yatırım snapshots are required")
         yf_meta = [
@@ -449,9 +456,10 @@ class PredictionUniverseInputAssembler:
         xu100["prediction_date"] = pd.to_datetime(
             xu100["prediction_date"], errors="raise"
         ).dt.normalize()
-        # Until the full active BIST master is frozen, the acceptance assembler
-        # treats each date-effective identity row as the explicit master key.
-        master = identity.loc[:, ["security_id", "prediction_date"]].drop_duplicates()
+        master_frame = self.snapshot_store.read_dataframe(active_meta)
+        master = master_frame.loc[:, ["security_id"]].drop_duplicates()
+        if master["security_id"].duplicated().any():
+            raise PredictionUniverseError("active universe contains duplicate security_id")
         universe = build_prediction_universe(
             master,
             observations,
@@ -466,7 +474,7 @@ class PredictionUniverseInputAssembler:
             features,
             calendar,
             xu100,
-            tuple([*supplied_feature_inputs, feature_meta]),
+            tuple([*supplied_feature_inputs, feature_meta, active_meta]),
         )
 
     def _verify(

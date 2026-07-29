@@ -43,6 +43,10 @@ def test_two_fold_synthetic_pipeline_is_oos_immutable_and_idempotent(tmp_path) -
         "feature_snapshot_checksum": "feature-checksum",
         "label_snapshot_id": "label-snapshot",
         "label_snapshot_checksum": "label-checksum",
+        "active_universe_snapshot_id": "active-universe-snapshot",
+        "active_universe_snapshot_checksum": "active-universe-checksum",
+        "active_universe_version": "bist_active_universe_v1",
+        "active_universe_as_of_date": "2026-07-29",
         "feature_catalog_checksum": "catalog-checksum",
     }
 
@@ -81,6 +85,10 @@ def test_two_fold_synthetic_pipeline_is_oos_immutable_and_idempotent(tmp_path) -
     assert metadata["feature_names_in_order"] == list(BASELINE_V1_FEATURES)
     assert metadata["random_seed"] == 42
     assert metadata["training_fingerprint"]
+    assert metadata["active_universe_snapshot_id"] == "active-universe-snapshot"
+    assert metadata["active_universe_snapshot_checksum"] == "active-universe-checksum"
+    assert metadata["active_universe_version"] == "bist_active_universe_v1"
+    assert metadata["active_universe_as_of_date"] == "2026-07-29"
     assert feature_schema["feature_count"] == 32
     assert first_fold_metadata["validation_calendar_session_count"] == 20
     assert first_fold_metadata["validation_labeled_session_count"] == 17
