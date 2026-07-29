@@ -8,24 +8,34 @@ BİST Kısa Vadeli Hisse Yükseliş Tahmin Sistemi
 
 Borsa İstanbul'da işlem gören hisseler arasından, önümüzdeki 2-3 işlem günü içinde en az %5 yükselme ihtimali yüksek olan hisseleri belirleyen ve sıralayan sade bir makine öğrenmesi sistemi geliştirmek.
 
-Sistem her hisse için pozitif sınıf olasılığı üretecek ve hisseleri bu olasılığa göre sıralayacaktır.
+Sistem her hisse için LightGBM ham pozitif sınıf skorunu üretecek ve hisseleri bu skora göre sıralayacaktır. Bu skor, kalibrasyon doğrulanmadan gerçek gerçekleşme olasılığı olarak iddia edilmeyecektir.
 
 ## Ana Model
 
 - LightGBM Classifier
-- Model çıktısı: Her hisse için `P(+%5)` olasılığı
-- Günlük seçim sayısı henüz kesinleşmemiştir; model hisseleri pozitif sınıf olasılığına göre sıralayacaktır.
+- Model çıktısı: Her hisse için ham `LGBMClassifier.predict_proba(X)[:,1]` pozitif sınıf skoru
+- Skor kalibre edilmiş gerçek olasılık olarak yorumlanmayacaktır.
+- Günlük seçim sayısı henüz kesinleşmemiştir; model hisseleri ham pozitif sınıf skoruna göre sıralayacaktır.
 
 ## İlk Sürümün Kapsamı
 
+### `baseline_v1` mevcut kapsamı
+
 - Günlük BİST fiyat ve hacim verileri
 - BİST endeks verileri
-- Sektör bilgileri
-- Likidite bilgileri
 - Veri toplama başlangıcındaki güncel aktif BİST şirket paylarından oluşan sabit hisse evreni
 - Güncel aktif hisselerin doğrulanmış eski işlem kodlarının aynı menkul kıymet kimliği altında birleştirilmesi
-- Fiyat, hacim, momentum, volatilite ve relatif güç feature'ları
+- Tam 32 fiyat, hacim, momentum, volatilite, gün içi yapı, endeks/relatif güç ve kesitsel feature
+- Likiditenin TL hacim, hacim anomalisi, hacim değişkenliği ve Amihud fiyat etkisi gibi proxy'lerle temsil edilmesi
 - Zaman sıralı walk-forward validation
+
+`baseline_v1` içinde point-in-time sektör feature'ı yoktur. Sektör feature'ları tarih-etkin sektör mapping'i hazır olana kadar ertelenmiştir. Piyasa değeri ve halka açık piyasa değeri tabanlı turnover feature'ları point-in-time güvenlikleri doğrulanana kadar ertelenmiştir. Likidite filtresi henüz kesinleşmemiştir; mevcut likidite proxy'leri master evren filtresi değildir.
+
+### Daha geniş ilk sürüm deney yol haritası
+
+- Tarih-etkin sektör mapping'i doğrulandıktan sonra sektör feature'larının ayrı deneylerde değerlendirilmesi
+- Point-in-time piyasa değeri ve halka açık piyasa değeri doğrulandıktan sonra turnover feature'larının değerlendirilmesi
+- Likidite filtresinin ayrı karar ve deney konusu olarak belirlenmesi
 - Gerçekçi backtest
 - Daha sonra paper trading
 
@@ -46,6 +56,8 @@ yFinance, bütün fiyat bağımlı hesapların tek kaynağıdır. Open, high, lo
 Orijinal yFinance sağlayıcı fiyatları ile nominal fiyatlar ayrı saklanır. Split normalizasyonu yalnız tarihsel fiyat birimi dönüşümüdür; split faktörü model feature'ı veya tahmin sinyali değildir.
 
 İş Yatırım ana BİST işlem takvimi, TL işlem hacmi, endeks verileri, ağırlıklı ortalama fiyat, piyasa değeri, halka açık piyasa değeri ve kurumsal işlem/veri kalite sinyalleri için kullanılır. İş Yatırım fiyatları yFinance fiyatlarıyla label veya backtest hesabında karıştırılmaz; yalnız çapraz veri kalite uyarısı üretir.
+
+Kaynakta piyasa değeri, halka açık piyasa değeri veya sektör alanlarının bulunması bunların `baseline_v1` feature'ı olduğu anlamına gelmez. Bu alanlar yalnız tarih-etkin ve point-in-time güvenlikleri ayrıca doğrulandıktan sonra daha geniş ilk sürüm deney yol haritasında değerlendirilebilir.
 
 ## İlk Sürümde Kullanılmayacaklar
 
@@ -81,7 +93,7 @@ Temel metrikler:
 
 1. Günlük veri güncellemesi, sağlayıcı verilerini değişmez ve checksum ile doğrulanabilir snapshot'lar halinde kaydeder.
 2. Bağımsız model eğitimi yalnız kullanıcı tarafından açıkça çalıştırılır; belirtilen `as_of_date` tarihindeki tamamlanmış label'ları kullanarak LightGBM'i sıfırdan eğitir ve yeni bir model sürümü oluşturur.
-3. Günlük tahmin, yeniden eğitim yapmadan kullanıcının seçtiği veya aktif model sürümüyle tahmin tarihindeki en güncel kullanılabilir feature'ları değerlendirir ve hisseleri pozitif sınıf olasılığına göre sıralar.
+3. Günlük tahmin, yeniden eğitim yapmadan kullanıcının seçtiği veya aktif model sürümüyle tahmin tarihindeki en güncel kullanılabilir feature'ları değerlendirir ve hisseleri ham pozitif sınıf skoruna göre sıralar.
 4. Tahmin sonucu; `as_of_date`, model sürümü, veri snapshot kimlikleri ve üretim zamanı ile sürümlü olarak kaydedilir.
 
 Model ve tahmin kayıtları ilk sürümde MLflow gibi ek bir sistem yerine sade, dosya tabanlı ve değişmez artifact yapısıyla yönetilecektir.

@@ -22,6 +22,8 @@ Bu olasılık:
 - Hisseleri günlük sıralamak için kullanılacaktır.
 - İlk 5-10 hisseyi seçmek için temel skor olacaktır.
 
+**D032 revizyon notu:** D003'teki `P(+%5)` ifadesi D032 sonrasında ham `LGBMClassifier.predict_proba(X)[:,1]` pozitif sınıf skoru olarak uygulanır. Ayrı kalibrasyon modeli bulunmadığından kalibre edilmiş gerçek olasılık olduğu iddia edilmez.
+
 ### D004 — İlk Sürümde Kullanılmayacak Modeller
 
 İlk sürümde aşağıdakiler kullanılmayacaktır:
@@ -51,6 +53,8 @@ Precision, Recall, F1-score, ROC-AUC, PR-AUC, Precision@5, Precision@10, ortalam
 İlk sürümde fiyat, hacim, endeks, sektör ve likidite verileri kullanılacaktır.
 
 İlk sürümde haber, KAP metinleri, sosyal medya, LLM tabanlı feature'lar ve otomatik emir gönderme kullanılmayacaktır.
+
+**D028 revizyon notu:** D007 geniş ilk sürüm veri kapsamını tanımlar. İlk `baseline_v1` uygulamasında point-in-time sektör mapping'i bulunmadığı için sektör feature'ları ertelenmiştir. Likidite baseline'da TL hacim tabanlı proxy'lerle temsil edilir; piyasa değeri tabanlı turnover feature'ları ve likidite filtresi henüz bağlayıcı değildir.
 
 ### D008 — Karmaşıklık İlkesi
 

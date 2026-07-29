@@ -1,12 +1,18 @@
 # DATA DICTIONARY
 
-**Son doğrulama:** 2026-07-27
+**Belge son güncellemesi:** 2026-07-29
 
-**Doğrulama kapsamı:** `scripts/source_acceptance_test.py` ile THYAO, GARAN, ASELS, BIMAS, TUPRS, EREGL, SISE, SASA, KCHOL ve HEKTS gerçek yanıtları
+**Kaynak sütunu kabul doğrulaması:** 2026-07-27
+
+**Aktif evren ve training provenance doğrulaması:** 2026-07-29
+
+**Kaynak sütunu doğrulama kapsamı:** `scripts/source_acceptance_test.py` ile THYAO, GARAN, ASELS, BIMAS, TUPRS, EREGL, SISE, SASA, KCHOL ve HEKTS gerçek İş Yatırım/yFinance yanıtları
 
 **Kaynaklar:** İş Yatırım web veri uç noktası (repo içi dayanıklı istemci; `isyatirimhisse 5.0.1` davranışı referans alınmıştır) ve yFinance (`yfinance 1.5.2`)
 
-Bu sözlük kaynak kabul testinde gerçekten gözlenen sütunları, bunlardan üretilen açık kalite alanlarını ve doğrulanmış derived XU100, global BİST takvimi ile `baseline_v1` feature snapshot alanlarını içerir. `T+1–T+3` işlem yapılabilirlik, kurumsal işlem ve gelecekteki split faktörü model feature'ı değildir. Tarihsel düzeltilmiş değerler ve yFinance action geçmişi bugünkü sorguda gelecekteki düzeltmeleri içerebildiği için point-in-time feature olarak kullanılamaz.
+10 hisselik kabul paneli yalnız İş Yatırım/yFinance kaynak sütunlarının gerçek yanıtlardaki kabulünü doğrular. D034 aktif evren, D030 prediction universe ve D031–D033 model artifact/training provenance alanları bu 10 hisselik kaynak paneliyle doğrulanmış sayılmaz; bunların kapsamı ayrı snapshot, entegrasyon ve regresyon doğrulamalarıyla belgelenir.
+
+Bu sözlük kaynak kabul testinde gerçekten gözlenen sütunları, bunlardan üretilen açık kalite alanlarını ve ayrıca doğrulanmış derived XU100, global BİST takvimi, `baseline_v1`, aktif evren, prediction universe ve model artifact sözleşme alanlarını içerir. `T+1–T+3` işlem yapılabilirlik, kurumsal işlem ve gelecekteki split faktörü model feature'ı değildir. Tarihsel düzeltilmiş değerler ve yFinance action geçmişi bugünkü sorguda gelecekteki düzeltmeleri içerebildiği için point-in-time feature olarak kullanılamaz.
 
 ## Veri Snapshot Katmanları
 
