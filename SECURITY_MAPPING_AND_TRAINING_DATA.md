@@ -18,7 +18,7 @@ Gerçek CSV'deki resmî kaynak alanları da doldurulmalıdır. Eski ve yeni tick
 
 ## 3. Yeni eğitim verisi nasıl çekilir?
 
-Aktif evren önce resmî kaynaklardan exact tarihle dondurulur. V1 kaynaklarında resmî tarihsel alias kanıtı bulunmadığında ana mapping CSV'si boş kalabilir; bu durum veri akışını durdurmaz ve güncel ticker `AUTO_NEW_TICKER` olarak planlanır. Alias benzerlikten türetilmez; `reports/universe/ticker_mapping_review_v1.csv` içindeki `NO_HISTORICAL_TICKER_FOUND` satırları ana mapping'e aktarılmaz.
+Aktif evren önce resmî kaynaklardan exact tarihle dondurulur. V1 kaynaklarında resmî tarihsel alias kanıtı bulunmadığında ana mapping CSV'si boş kalabilir; bu durum veri akışını durdurmaz ve güncel ticker `AUTO_NEW_TICKER` olarak planlanır. Alias benzerlikten türetilmez; `reports/universe/ticker_mapping_review_v1.csv` içindeki `NO_HISTORICAL_TICKER_FOUND` satırları ana mapping'e aktarılmaz. Bu inceleme durumu, ilgili payın hiç ticker değiştirmediğinin başarıyla doğrulandığı anlamına gelmez. Tam tarihsel veri toplama sırasında açıklanamayan seri başlangıcı, bitişi veya boşluğu görülürse ayrı resmî mapping incelemesi açılır; alias ancak eski/yeni ticker ve geçiş tarihleri KAP veya Borsa İstanbul kanıtıyla doğrulandıktan sonra ana mapping'e eklenir.
 
 ```powershell
 python scripts/build_active_bist_universe.py `
