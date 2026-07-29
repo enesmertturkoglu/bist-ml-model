@@ -77,6 +77,29 @@ def test_same_canonical_data_is_idempotent(tmp_path: Path) -> None:
     assert store.load_revisions() == []
 
 
+def test_find_usable_snapshot_returns_only_verified_complete(
+    tmp_path: Path,
+) -> None:
+    store = SnapshotStore(_config(tmp_path))
+    request = _request()
+    complete = store.save_dataframe(_frame(), request).metadata
+    store.record_failed_attempt(request, "later provider failure")
+
+    found = store.find_usable_snapshot(request)
+
+    assert found is not None
+    assert found.snapshot_id == complete.snapshot_id
+
+
+def test_find_usable_snapshot_ignores_corrupt_complete(tmp_path: Path) -> None:
+    store = SnapshotStore(_config(tmp_path))
+    request = _request()
+    complete = store.save_dataframe(_frame(), request).metadata
+    (store.config.data_root / complete.file_path).write_bytes(b"corrupt")
+
+    assert store.find_usable_snapshot(request) is None
+
+
 def test_one_changed_cell_creates_revision_and_diff(tmp_path: Path) -> None:
     store = SnapshotStore(_config(tmp_path))
     first = store.save_dataframe(_frame(), _request()).metadata

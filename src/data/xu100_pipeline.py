@@ -270,6 +270,7 @@ class Xu100Pipeline:
         end_date: date,
         *,
         global_calendar_snapshot_id: str,
+        refresh: bool = False,
     ) -> Xu100RunResult:
         calendar_meta = self.snapshot_store.get_snapshot(global_calendar_snapshot_id)
         if not self.snapshot_store.is_usable(calendar_meta):
@@ -277,7 +278,6 @@ class Xu100Pipeline:
         if calendar_meta.dataset_type != "global_bist_sessions":
             raise Xu100ValidationError("snapshot is not a global BIST calendar")
         calendar = self.snapshot_store.read_dataframe(calendar_meta)
-        raw = self.client.fetch_history(start_date, end_date)
         raw_request = SnapshotRequest(
             source="isyatirim",
             dataset_type="xu100_index_history",
@@ -290,12 +290,23 @@ class Xu100Pipeline:
             layer="raw",
             identity_columns=("index_code", "source_timestamp_ms"),
         )
-        raw_written = self.snapshot_store.save_dataframe(raw, raw_request)
+        raw_existing = (
+            None
+            if refresh
+            else self.snapshot_store.find_usable_snapshot(raw_request)
+        )
+        if raw_existing is None:
+            raw = self.client.fetch_history(start_date, end_date)
+            raw_written = self.snapshot_store.save_dataframe(raw, raw_request)
+            raw_metadata = raw_written.metadata
+        else:
+            raw_metadata = raw_existing
+            raw = self.snapshot_store.read_dataframe(raw_metadata)
         validated, report = validate_xu100_history(raw, calendar)
         context: Mapping[str, object] = {
-            "input_snapshot_ids": [raw_written.metadata.snapshot_id, calendar_meta.snapshot_id],
+            "input_snapshot_ids": [raw_metadata.snapshot_id, calendar_meta.snapshot_id],
             "input_content_checksums": {
-                raw_written.metadata.snapshot_id: raw_written.metadata.content_checksum,
+                raw_metadata.snapshot_id: raw_metadata.content_checksum,
                 calendar_meta.snapshot_id: calendar_meta.content_checksum,
             },
             "global_calendar_checksum": calendar_meta.content_checksum,
@@ -313,9 +324,9 @@ class Xu100Pipeline:
             provider_library_version=self.provider_version,
             code_commit_sha=self.code_commit_sha,
             layer="derived",
-            input_snapshot_ids=(raw_written.metadata.snapshot_id, calendar_meta.snapshot_id),
+            input_snapshot_ids=(raw_metadata.snapshot_id, calendar_meta.snapshot_id),
             identity_columns=("prediction_date",),
             revision_context=context,
         )
         validated_written = self.snapshot_store.save_dataframe(validated, validated_request)
-        return Xu100RunResult(raw_written.metadata, validated_written.metadata, report)
+        return Xu100RunResult(raw_metadata, validated_written.metadata, report)

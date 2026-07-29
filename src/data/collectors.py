@@ -62,6 +62,8 @@ class SourceCollectionResult:
     source: str
     raw_snapshot: SnapshotMetadata
     derived_snapshots: tuple[SnapshotMetadata, ...] = ()
+    failure_class: str | None = None
+    failure_reason: str | None = None
 
     @property
     def complete(self) -> bool:
@@ -113,27 +115,24 @@ class MarketDataCollector:
         self.yfinance_version = _package_version("yfinance")
 
     def collect_isyatirim(
-        self, ticker: str, start_date: date, end_date: date
+        self,
+        ticker: str,
+        start_date: date,
+        end_date: date,
+        *,
+        refresh: bool = False,
     ) -> SourceCollectionResult:
         ticker = normalize_ticker(ticker)
-        request = SnapshotRequest(
-            source="isyatirim",
-            dataset_type="equity_history",
-            ticker_or_instrument=ticker,
-            request_start_date=start_date,
-            request_end_date=end_date,
-            request_parameters={
-                "endpoint": "HisseTekil",
-                "inclusive_end": True,
-            },
-            provider_library_version=self.isyatirim_version,
-            code_commit_sha=self.code_commit_sha,
-            layer="raw",
-            identity_columns=("HGDG_HS_KODU", "HGDG_TARIH"),
-        )
+        request = self.isyatirim_request(ticker, start_date, end_date)
+        if not refresh:
+            existing = self.snapshot_store.find_usable_snapshot(request)
+            if existing is not None:
+                return SourceCollectionResult("isyatirim", existing)
         frame: pd.DataFrame | None = None
         try:
             frame = self.isyatirim_client.fetch_history(ticker, start_date, end_date)
+            if frame.empty:
+                raise ValueError(f"İş Yatırım returned no rows for {ticker}")
             _require_columns(
                 frame,
                 ISYATIRIM_SNAPSHOT_REQUIRED_COLUMNS,
@@ -144,35 +143,70 @@ class MarketDataCollector:
             written = self.snapshot_store.record_failed_attempt(
                 request, error, partial_data=error.partial_data
             )
+            failure = (type(error).__name__, str(error))
         except Exception as error:  # provider/schema failures must be auditable
             written = self.snapshot_store.record_failed_attempt(
                 request, error, partial_data=frame
             )
+            failure = (type(error).__name__, str(error))
         else:
             written = self.snapshot_store.save_dataframe(frame, request)
-        return SourceCollectionResult("isyatirim", written.metadata)
+            failure = (None, None)
+        return SourceCollectionResult(
+            "isyatirim",
+            written.metadata,
+            failure_class=failure[0],
+            failure_reason=failure[1],
+        )
 
     def collect_yfinance(
-        self, ticker: str, start_date: date, end_date: date
+        self,
+        ticker: str,
+        start_date: date,
+        end_date: date,
+        *,
+        refresh: bool = False,
     ) -> SourceCollectionResult:
         ticker = normalize_ticker(ticker)
-        raw_request = SnapshotRequest(
-            source="yfinance",
-            dataset_type="equity_history",
-            ticker_or_instrument=ticker,
-            request_start_date=start_date,
-            request_end_date=end_date,
-            request_parameters={
-                "provider_ticker": f"{ticker.strip().upper()}.IS",
-                "auto_adjust": False,
-                "actions": True,
-                "inclusive_end": True,
-            },
-            provider_library_version=self.yfinance_version,
-            code_commit_sha=self.code_commit_sha,
-            layer="raw",
-            identity_columns=("ticker", "date"),
+        raw_request = self.yfinance_raw_request(ticker, start_date, end_date)
+        raw_existing = (
+            None
+            if refresh
+            else self.snapshot_store.find_usable_snapshot(raw_request)
         )
+        if raw_existing is not None:
+            derived_request = self.yfinance_nominal_request(
+                ticker, start_date, end_date, raw_existing.snapshot_id
+            )
+            nominal_existing = self.snapshot_store.find_usable_snapshot(
+                derived_request
+            )
+            if nominal_existing is not None:
+                return SourceCollectionResult(
+                    "yfinance", raw_existing, (nominal_existing,)
+                )
+            try:
+                prepared = self.snapshot_store.read_dataframe(raw_existing)
+                raw = _prepared_yfinance_provider_frame(prepared)
+                normalized = normalize_yfinance_history(raw, ticker)
+                nominal = nominal_ohlc_snapshot_frame(normalized)
+            except Exception as error:
+                derived_written = self.snapshot_store.record_failed_attempt(
+                    derived_request, error
+                )
+                failure = (type(error).__name__, str(error))
+            else:
+                derived_written = self.snapshot_store.save_dataframe(
+                    nominal, derived_request
+                )
+                failure = (None, None)
+            return SourceCollectionResult(
+                "yfinance",
+                raw_existing,
+                (derived_written.metadata,),
+                failure_class=failure[0],
+                failure_reason=failure[1],
+            )
         raw: pd.DataFrame | None = None
         try:
             raw = self._fetch_yfinance_with_retry(ticker, start_date, end_date)
@@ -192,21 +226,19 @@ class MarketDataCollector:
             written = self.snapshot_store.record_failed_attempt(
                 raw_request, error, partial_data=partial
             )
-            return SourceCollectionResult("yfinance", written.metadata)
+            return SourceCollectionResult(
+                "yfinance",
+                written.metadata,
+                failure_class=type(error).__name__,
+                failure_reason=str(error),
+            )
 
         raw_written = self.snapshot_store.save_dataframe(prepared, raw_request)
-        derived_request = SnapshotRequest(
-            source="yfinance",
-            dataset_type="nominal_ohlc",
-            ticker_or_instrument=ticker,
-            request_start_date=start_date,
-            request_end_date=end_date,
-            request_parameters={"normalization_decision": "D024", "version": "v1"},
-            provider_library_version=self.yfinance_version,
-            code_commit_sha=self.code_commit_sha,
-            layer="derived",
-            input_snapshot_ids=(raw_written.metadata.snapshot_id,),
-            identity_columns=("ticker", "date"),
+        derived_request = self.yfinance_nominal_request(
+            ticker,
+            start_date,
+            end_date,
+            raw_written.metadata.snapshot_id,
         )
         try:
             normalized = normalize_yfinance_history(raw, ticker)
@@ -215,30 +247,48 @@ class MarketDataCollector:
             derived_written = self.snapshot_store.record_failed_attempt(
                 derived_request, error
             )
+            failure = (type(error).__name__, str(error))
         else:
             derived_written = self.snapshot_store.save_dataframe(
                 nominal, derived_request
             )
+            failure = (None, None)
         return SourceCollectionResult(
             "yfinance",
             raw_written.metadata,
             (derived_written.metadata,),
+            failure_class=failure[0],
+            failure_reason=failure[1],
         )
 
     def collect_ticker(
-        self, ticker: str, start_date: date, end_date: date
+        self,
+        ticker: str,
+        start_date: date,
+        end_date: date,
+        *,
+        refresh: bool = False,
     ) -> TickerCollectionResult:
         """Run both providers even if one source returns a failed snapshot."""
 
         normalized_ticker = normalize_ticker(ticker)
         results = (
-            self.collect_isyatirim(normalized_ticker, start_date, end_date),
-            self.collect_yfinance(normalized_ticker, start_date, end_date),
+            self.collect_isyatirim(
+                normalized_ticker, start_date, end_date, refresh=refresh
+            ),
+            self.collect_yfinance(
+                normalized_ticker, start_date, end_date, refresh=refresh
+            ),
         )
         return TickerCollectionResult(normalized_ticker, results)
 
     def collect_many(
-        self, tickers: Iterable[str], start_date: date, end_date: date
+        self,
+        tickers: Iterable[str],
+        start_date: date,
+        end_date: date,
+        *,
+        refresh: bool = False,
     ) -> tuple[TickerCollectionResult, ...]:
         if self.ticker_mapping is not None:
             periods = plan_active_ticker_collection(
@@ -248,11 +298,80 @@ class MarketDataCollector:
                 self.ticker_mapping,
             )
             return tuple(
-                self.collect_ticker(period.ticker, period.start_date, period.end_date)
+                self.collect_ticker(
+                    period.ticker,
+                    period.start_date,
+                    period.end_date,
+                    refresh=refresh,
+                )
                 for period in periods
             )
         return tuple(
-            self.collect_ticker(ticker, start_date, end_date) for ticker in tickers
+            self.collect_ticker(
+                ticker, start_date, end_date, refresh=refresh
+            )
+            for ticker in tickers
+        )
+
+    def isyatirim_request(
+        self, ticker: str, start_date: date, end_date: date
+    ) -> SnapshotRequest:
+        ticker = normalize_ticker(ticker)
+        return SnapshotRequest(
+            source="isyatirim",
+            dataset_type="equity_history",
+            ticker_or_instrument=ticker,
+            request_start_date=start_date,
+            request_end_date=end_date,
+            request_parameters={"endpoint": "HisseTekil", "inclusive_end": True},
+            provider_library_version=self.isyatirim_version,
+            code_commit_sha=self.code_commit_sha,
+            layer="raw",
+            identity_columns=("HGDG_HS_KODU", "HGDG_TARIH"),
+        )
+
+    def yfinance_raw_request(
+        self, ticker: str, start_date: date, end_date: date
+    ) -> SnapshotRequest:
+        ticker = normalize_ticker(ticker)
+        return SnapshotRequest(
+            source="yfinance",
+            dataset_type="equity_history",
+            ticker_or_instrument=ticker,
+            request_start_date=start_date,
+            request_end_date=end_date,
+            request_parameters={
+                "provider_ticker": f"{ticker}.IS",
+                "auto_adjust": False,
+                "actions": True,
+                "inclusive_end": True,
+            },
+            provider_library_version=self.yfinance_version,
+            code_commit_sha=self.code_commit_sha,
+            layer="raw",
+            identity_columns=("ticker", "date"),
+        )
+
+    def yfinance_nominal_request(
+        self,
+        ticker: str,
+        start_date: date,
+        end_date: date,
+        raw_snapshot_id: str,
+    ) -> SnapshotRequest:
+        ticker = normalize_ticker(ticker)
+        return SnapshotRequest(
+            source="yfinance",
+            dataset_type="nominal_ohlc",
+            ticker_or_instrument=ticker,
+            request_start_date=start_date,
+            request_end_date=end_date,
+            request_parameters={"normalization_decision": "D024", "version": "v1"},
+            provider_library_version=self.yfinance_version,
+            code_commit_sha=self.code_commit_sha,
+            layer="derived",
+            input_snapshot_ids=(raw_snapshot_id,),
+            identity_columns=("ticker", "date"),
         )
 
     def _fetch_yfinance_with_retry(
@@ -295,6 +414,19 @@ def _fetch_yfinance_history(
         actions=True,
         timeout=timeout_seconds,
     )
+
+
+def _prepared_yfinance_provider_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Restore the provider-shaped frame from an immutable prepared raw snapshot."""
+
+    missing = {"ticker", "date", *YFINANCE_REQUIRED_COLUMNS}.difference(frame.columns)
+    if missing:
+        raise ValueError(
+            f"stored yFinance raw snapshot fields missing: {sorted(missing)}"
+        )
+    restored = frame.drop(columns=["ticker"]).copy()
+    restored["date"] = pd.to_datetime(restored["date"], errors="raise")
+    return restored.set_index("date")
 
 
 def _package_version(name: str) -> str:

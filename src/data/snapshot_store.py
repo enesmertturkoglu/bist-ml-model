@@ -450,6 +450,20 @@ class SnapshotStore:
             )
         return matches[0]
 
+    def find_usable_snapshot(
+        self, request: SnapshotRequest
+    ) -> SnapshotMetadata | None:
+        """Return the latest physically verified COMPLETE snapshot for a request."""
+
+        request_values = self._normalize_request(request)
+        logical_key = self._logical_dataset_key(request_values)
+        matches = [
+            item
+            for item in self.load_manifest()
+            if item.logical_dataset_key == logical_key
+        ]
+        return self._latest_valid_complete(matches)
+
     def read_dataframe(
         self, snapshot: SnapshotMetadata | str, *, require_usable: bool = True
     ) -> pd.DataFrame:
