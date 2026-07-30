@@ -70,6 +70,46 @@ python scripts/train_lightgbm.py `
 
 Her eski/güncel ticker için iki raw snapshot seçeneği tekrarlanır. Komut yalnız doğrulanmış `COMPLETE` snapshot'ları kabul eder; feature katalog checksum'u, label/feature checksum'ları, aktif evren snapshot ID/checksum/sürüm/as-of alanları, config, kod SHA, fold tanımları ve seed'i fingerprint'e bağlar. Identity snapshot master evren yerine kullanılamaz. Aynı tamamlanmış fingerprint yeni klasör açmadan mevcut artifact'ı döndürür.
 
+## 3.1 Tam manifest koşusu ve resume
+
+Dondurulmuş V1 bağlamının tek orchestration komutu:
+
+```powershell
+python -u scripts/run_full_history_pipeline.py
+```
+
+Komut varsayılan olarak aşağıdaki değerleri fail-closed doğrular ve değiştirmez:
+
+```text
+active_universe_snapshot_id = snap_fb0011eaecf3b4b7_r0002_112665b37839
+universe_version = bist_active_universe_v1
+active_universe_as_of_date = 2026-07-29
+master_security_count = 621
+collection_start_date = 2020-03-13
+collection_end_date = 2026-07-29
+```
+
+Her manifest satırı sonrasında `reports/full_history/collection_status.csv`, `collection_summary.json` ve `run_provenance.json` atomik yenilenir. Kesilmiş koşuda aynı komut yeniden çalıştırılır; fiziksel bütünlükten geçen `COMPLETE` raw/nominal snapshot'lar provider'a yeniden sorulmaz, yalnız eksik/başarısız satırlar sürdürülür. Başarılı snapshot'ı bilinçli yeniden indirmek için açıkça `--refresh` gerekir.
+
+Yalnız preflight çalıştırmak için:
+
+```powershell
+python scripts/run_full_history_pipeline.py --preflight-only
+```
+
+Üretim komutu security/provider düzeyinde sıralıdır; İş Yatırım'ın mevcut adaptive 12/6/3 aylık chunk, timeout, retry, backoff ve cache davranışını kullanır. Yeni veya kısa tarihçeli bir ticker'ın eski dönemleri uzun bounded retry süresi doğurabilir. Süreç kesilirse son atomik satır checkpoint'i korunur; `run_provenance.json` experiment-ready olmadığını göstermelidir.
+
+Tam collection tamamlanmadan identity/clean/label/XU100/feature/prediction/fold raporları tam sayılmaz. `ticker_mapping_review.csv` sinyalleri otomatik alias değildir; `NO_HISTORICAL_TICKER_FOUND` da “ticker hiç değişmedi” doğrulaması değildir. Açıklanamayan boşluklar için KAP/Borsa İstanbul kanıtı ayrı incelenir.
+
+`scripts/report_fold_feasibility.py`, gerektiğinde dışa aktarılmış auditable training panel ve global takvim CSV'sinden yalnız feasibility raporunu yeniden üretir; LightGBM çağırmaz:
+
+```powershell
+python scripts/report_fold_feasibility.py `
+  --training-panel-csv <TRAINING_PANEL_CSV> `
+  --global-calendar-csv <GLOBAL_CALENDAR_CSV> `
+  --as-of-date 2026-07-29
+```
+
 ## 4. Mapping güncellenmezse ne olur?
 
 Yeni halka arz yeni security olarak alınır. Kod değiştirmiş fakat mapping'e eklenmemiş pay da geçici olarak yeni security olur ve eski tarihsel seriyle birleşmez. Mapping daha sonra düzeltildiğinde identity, clean, label ve feature snapshot'ları yeniden üretilmeli; model yeni mapping sürümüyle yeniden eğitilmelidir. Eski snapshot'lar değiştirilmez.

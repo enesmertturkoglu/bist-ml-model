@@ -169,6 +169,57 @@ def test_pipeline_persists_raw_epoch_and_validated_benchmark_layers(
     assert saved_raw.loc[0, "source_timestamp_ms"] == _raw().loc[0, "source_timestamp_ms"]
 
 
+def test_pipeline_resume_does_not_refetch_verified_xu100(tmp_path: Path) -> None:
+    config = replace(
+        MarketDataConfig(),
+        data_root=tmp_path / "data",
+        operational_cache_root=tmp_path / "cache",
+    )
+    store = SnapshotStore(config)
+    calendar = store.save_dataframe(
+        _calendar(),
+        SnapshotRequest(
+            source="isyatirim",
+            dataset_type="global_bist_sessions",
+            ticker_or_instrument="BIST",
+            request_start_date="2024-01-02",
+            request_end_date="2024-01-08",
+            layer="derived",
+            identity_columns=("session_date",),
+        ),
+    ).metadata
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def fetch_history(self, *_args, **_kwargs) -> pd.DataFrame:
+            self.calls += 1
+            return add_timestamp_candidates(_raw())
+
+    client = FakeClient()
+    pipeline = Xu100Pipeline(
+        config,
+        snapshot_store=store,
+        client=client,  # type: ignore[arg-type]
+        code_commit_sha="a" * 40,
+    )
+    first = pipeline.run(
+        pd.Timestamp("2024-01-02").date(),
+        pd.Timestamp("2024-01-08").date(),
+        global_calendar_snapshot_id=calendar.snapshot_id,
+    )
+    second = pipeline.run(
+        pd.Timestamp("2024-01-02").date(),
+        pd.Timestamp("2024-01-08").date(),
+        global_calendar_snapshot_id=calendar.snapshot_id,
+    )
+
+    assert client.calls == 1
+    assert second.raw_snapshot.snapshot_id == first.raw_snapshot.snapshot_id
+    assert second.validated_snapshot.snapshot_id == first.validated_snapshot.snapshot_id
+
+
 def test_end_and_yfinance_cross_checks_are_diagnostic_only() -> None:
     validated, _ = validate_xu100_history(_raw(), _calendar())
     stock_frames: list[pd.DataFrame] = []

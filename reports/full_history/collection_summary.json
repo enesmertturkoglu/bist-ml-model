@@ -1,0 +1,13 @@
+{
+  "clean_success_rate": 0.0,
+  "collection_attempted_count": 1,
+  "complete_security_count": 1,
+  "failed_security_count": 0,
+  "identity_success_rate": 0.0,
+  "isyatirim_success_rate": 1.0,
+  "label_success_rate": 0.0,
+  "master_security_count": 621,
+  "no_history_security_count": 0,
+  "partial_security_count": 0,
+  "yfinance_success_rate": 1.0
+}

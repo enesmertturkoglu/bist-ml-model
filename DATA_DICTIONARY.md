@@ -502,3 +502,29 @@ OOS minimum şeması:
 Daily Precision@K tarih satırı `requested_k`, `effective_k`, `selected_count`, `valid_label_count`, `positive_count`, `precision_at_k` ve `label_coverage_at_k` alanlarını taşır. Önce seçim yapılır; seçilmiş `NA` label yerine alt ranktan satır alınmaz.
 
 `models/lightgbm/<experiment_id>/metadata.json` ve fold metadata'sı model/fold sürümü, UTC eğitim zamanı, as-of/dönem sınırları, son kullanılabilir label tarihi, feature/label snapshot ID ve checksum'ları, aktif evren snapshot ID/checksum/sürüm/as-of alanları, feature katalog checksum'u, sıralı 32 feature, effective LightGBM parametreleri, random seed, kod commit SHA, satır/sınıf oranları, fold tanımları, train/validation/OOS metrikleri ve `training_fingerprint` alanlarını saklar. Fingerprint kod SHA + config checksum + feature/label snapshot checksum'ları + aktif evren kimliği/checksum/sürüm/as-of + katalog checksum + fold tanımları + seed bağlamıdır. Artifact klasörü atomik ve değişmezdir; aynı tamamlanmış fingerprint mevcut experiment'ı döndürür.
+
+## Tam Tarihsel Zincir Operasyon ve Feasibility Raporları
+
+`reports/full_history/collection_status.csv` her master security için tek satır taşır. Provider dönemleri birden fazlaysa ID/ticker alanları `|` ile sıralı birleştirilir; ayrıntılı dönemler bağlayıcı manifestte kalır.
+
+| Alan | Anlam |
+| --- | --- |
+| `security_id`, `current_ticker` | D034 master kimliği ve as-of ticker |
+| `provider_tickers_queried` | Tamamlanan manifest satırlarında sorgulanan gerçek provider ticker'ları |
+| `requested_start_date`, `requested_end_date` | Security'nin bağlayıcı manifest kapsamı |
+| `isyatirim_status`, `yfinance_status` | Security dönemlerinin toplu `PENDING/COMPLETE/PARTIAL/FAILED` durumu; yFinance `COMPLETE` nominal üretimini de gerektirir |
+| `raw_snapshot_ids`, `nominal_snapshot_id` | Fiziksel olarak doğrulanmış değişmez kaynak/nominal ID'leri |
+| `identity_snapshot_id`, `clean_snapshot_id`, `label_snapshot_id` | Derived zincir tamamlandıysa security kapsamını taşıyan batch snapshot'ları |
+| `first_observed_date`, `last_observed_date`, `observed_session_count` | Provider gözlem kapsamı |
+| `missing_session_count`, `longest_internal_gap_sessions` | Doğrulanmış global takvime göre eksik toplam ve en uzun iç boşluk |
+| `collection_complete` | Bütün manifest dönemlerinde iki raw provider ve nominal zincirinin doğrulanmış `COMPLETE` olması |
+| `failure_stage`, `failure_class`, `failure_reason` | Son başarısız aşama ve hassas değerleri redakte edilmiş exception bilgisi |
+| `mapping_review_required` | Geç/erken seri, iç boşluk, provider kapsam farkı veya provider hatası nedeniyle resmî inceleme gereği |
+
+`collection_summary.json` master/attempted/complete/partial/failed/no-history sayılarını ve İş Yatırım, yFinance, identity, clean, label başarı oranlarını verir. `run_provenance.json`; aktif evren snapshot/checksum, manifest checksum, mapping sürüm/checksum, kod/run durumu, kullanılan/dışlanan security listeleri ve derived snapshot lineage'ını taşır. `PARTIAL`, kesilmiş veya derived zinciri tamamlanmamış koşu `experiment_ready=false` kalır.
+
+`ticker_mapping_review.csv` geç başlangıç, erken bitiş, her uzunluktaki iç oturum boşluğu, provider kapsam uyuşmazlığı, symbol/redirect, iki sağlayıcıda tarihçe yokluğu ve olası ticker geçiş sinyalini raporlar. `possible_historical_ticker` yalnız resmî kanıtla doldurulabilir; orchestration alias tahmin etmez ve ana mapping CSV'sini değiştirmez.
+
+Kalite/prediction raporları `data_quality_summary.json`, `data_quality_by_security.csv`, `feature_quality.csv`, `class_distribution.json`, `prediction_universe_daily.csv` ve `prediction_universe_exclusions.csv` dosyalarıdır. Duplicate `security_id+date` veya duplicate feature key derived üretimi fail-closed durdurur. Prediction exclusion raporu her global oturum için D030'un yedi bağlayıcı nedenini sıfır sayılar dahil ayrı tutar.
+
+`fold_feasibility.csv` her global aday ilk test tarihinde fit/purge/validation/test oturumlarını, gerçek row/sınıf sayılarını, 2020–2021 kapsamını ve üretilebilecek tam fold sayısını taşır. `feasible=true` yalnız 20 warm-up, en az 252 kullanılabilir fit label oturumu, 60 validation takvim/57 kullanılabilir validation label oturumu, 20 tam test oturumu, fit+validation iki sınıf ve üç splitin boş olmamasıyla verilir. Rapor LightGBM çağırmaz ve ilk test tarihini bağlayıcı karara dönüştürmez.

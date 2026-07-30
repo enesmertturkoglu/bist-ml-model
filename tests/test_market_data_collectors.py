@@ -225,6 +225,37 @@ def test_repeated_collection_is_idempotent(tmp_path: Path) -> None:
     assert len(store.load_manifest()) == 3
 
 
+def test_resume_reuses_verified_snapshots_without_provider_fetch(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, yfinance_retries=1)
+    store = SnapshotStore(config)
+    is_client = FakeIsYatirimClient(_isyatirim_frame())
+    yf_calls = 0
+
+    def fetch_yfinance(*_: object) -> pd.DataFrame:
+        nonlocal yf_calls
+        yf_calls += 1
+        return _yfinance_frame()
+
+    collector = MarketDataCollector(
+        config,
+        snapshot_store=store,
+        isyatirim_client=is_client,
+        yfinance_fetcher=fetch_yfinance,
+        sleep_func=lambda _: None,
+        code_commit_sha="e" * 40,
+    )
+    collector.collect_ticker("AAA", date(2024, 1, 1), date(2024, 1, 2))
+    resumed = collector.collect_ticker(
+        "AAA", date(2024, 1, 1), date(2024, 1, 2)
+    )
+
+    assert resumed.complete
+    assert len(is_client.calls) == 1
+    assert yf_calls == 1
+
+
 def test_missing_required_provider_field_is_recorded_as_partial(tmp_path: Path) -> None:
     config = _config(tmp_path, yfinance_retries=1)
     store = SnapshotStore(config)

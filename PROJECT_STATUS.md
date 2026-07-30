@@ -173,6 +173,16 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - `2020-03-13`–`2026-07-29` tarihsel toplama manifesti 621 satırla üretildi. Prediction universe üretim assembler'ındaki identity-master fallback kaldırıldı; aktif evren snapshot ID/checksum/sürüm/as-of alanları training fingerprint ve model metadata'sına zorunlu provenance olarak eklendi.
 - Aktif evren fixture/parser, şirket payı kapsamı, duplicate, ayrı pay sınıfı, geçici işlem görmeme, sona eren üyelik, provenance, snapshot revision/idempotency, mapping review, collection manifest ve production master-snapshot zorunluluğu testleri eklendi. Tam regresyon `306 passed`; `compileall`, `pip check` ve `git diff --check` başarılı tamamlandı.
 
+## Tam Tarihsel Zincir Orkestrasyonu — 2026-07-29
+
+- `src/data/full_history_pipeline.py` ve `scripts/run_full_history_pipeline.py` ile D034 aktif evren snapshot'ını, 621-security manifest kapsamını, mapping sürüm/checksum'unu ve fiziksel snapshot bütünlüğünü provider çağrısından önce fail-closed doğrulayan sıralı orchestration eklendi.
+- Raw İş Yatırım/yFinance ve yFinance nominal snapshot'ları exact provider+ticker+dönem+istek parametreleri için yalnız fiziksel olarak doğrulanmış `COMPLETE` kayıt varsa yeniden kullanılır. `--refresh` verilmedikçe fetch tekrarlanmaz; her manifest satırı sonunda collection status/summary/provenance atomik checkpoint edilir.
+- Identity → cleaning → label → global takvim → validated XU100 → exact 32 `baseline_v1` feature → prediction universe → training dataset zinciri mevcut modüller yeniden kullanılarak bağlandı. Kısmi security kapsamı provenance'da kullanılan/dışlanan listelerle açık tutulur ve experiment-ready sayılmaz.
+- Veri kalitesi, mapping review, prediction universe ve D031 fold feasibility raporlayıcıları eklendi. Feasibility bütün aday ilk test oturumlarını LightGBM çağırmadan tarar; 20 warm-up, en az 252 kullanılabilir fit oturumu, 60/57 validation, 20 test, iki sınıf ve boş olmayan split koşullarını ölçer. Yeni minimum row eşiği veya D035 kararı eklenmedi.
+- Tam regresyon `320 passed`; `compileall`, `pip check` ve `git diff --check` başarılıdır. Gerçek LightGBM performans deneyi çalıştırılmadı, `EXPERIMENT_LOG.md` oluşturulmadı.
+- Production koşusu commit `5df025d` üzerinde `2020-03-13–2026-07-29` dönemi ve 621-security manifestiyle başlatıldı. İlk satır SNGYO iki raw + nominal snapshot ile `COMPLETE` oldu; ikinci satır ALKLC eski dönem adaptive timeout/chunk zincirinde 15 dakikayı aşınca talimattaki uzun-koşu fallback'i uygulanarak süreç durduruldu. Atomik checkpoint `1 attempted / 1 complete / 620 unattempted` durumunda korunmaktadır; derived zincir ve fold feasibility production verisinde henüz başlamadı.
+- SNGYO snapshot'ları: İş Yatırım raw `snap_3cf2e12ae7a8fa5a_r0001_3fcc1965ee24`, yFinance raw `snap_92ed2a2eb1936b23_r0001_ad225f186cc3`, nominal `snap_bf4397cacad8f98c_r0001_29f4f0443d02`. Raw/cache dosyaları Git'e eklenmemiştir.
+
 ## Kesinleşen Başlangıç Senaryosu
 
 - Tahmin zamanı: `T` günü piyasa kapandıktan sonra
@@ -219,8 +229,8 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Görevler
 
-1. `2020-03-13` sonrası tam raw, identity, clean, label, XU100 ve `baseline_v1` feature snapshot zincirini değişmez biçimde üret.
-2. Sınıf dağılımı ve fold feasibility raporunu üret; 21 oturum warm-up, en az 252 purged fit oturumu, 60 validation oturumu ve train/validation iki sınıf koşullarını ölç.
+1. `python -u scripts/run_full_history_pipeline.py` komutunu yeniden çalıştırarak doğrulanmış SNGYO snapshot'larını fetch etmeden kullan ve ALKLC satırından itibaren 621-security collection checkpoint'ini tamamla.
+2. Tam collection sonrası orchestration'ın identity, clean, label, XU100, `baseline_v1`, prediction universe, veri kalitesi, sınıf dağılımı ve fold feasibility aşamalarını tamamlamasını doğrula.
 3. İlk gerçek 20 oturumluk test başlangıç tarihini ayrı kararla kesinleştir.
 4. İlk gerçek walk-forward deneyinden hemen önce `EXPERIMENT_LOG.md` oluştur ve ardından deneyi çalıştır.
 
@@ -240,7 +250,7 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Ana Aşamalar
 
-- `2020-03-13` sonrası tam tarihsel snapshot zinciri
+- Checkpoint'ten resumable `2020-03-13` sonrası tam tarihsel snapshot zinciri
 - Fold feasibility ve ilk gerçek test tarihi kararı
 - İlk gerçek LightGBM walk-forward deneyi
 - Backtest
