@@ -11,7 +11,9 @@ import requests
 
 from src.data.isyatirim_client import (
     CACHE_SCHEMA_VERSION,
+    TIME_BUDGET_EXCEEDED,
     IsYatirimClient,
+    IsYatirimBudgetFetchError,
     IsYatirimFetchError,
     split_date_range,
 )
@@ -53,6 +55,33 @@ class QueueSession:
         return outcome
 
 
+class FakeClock:
+    def __init__(self) -> None:
+        self.value = 0.0
+
+    def monotonic(self) -> float:
+        return self.value
+
+    def advance(self, seconds: float) -> None:
+        self.value += float(seconds)
+
+    def sleep(self, seconds: float) -> None:
+        self.advance(seconds)
+
+
+class AdvancingQueueSession(QueueSession):
+    def __init__(
+        self, outcomes: Iterable[object], clock: FakeClock, advance_seconds: float
+    ) -> None:
+        super().__init__(outcomes)
+        self.clock = clock
+        self.advance_seconds = advance_seconds
+
+    def get(self, url: str, **kwargs: Any) -> FakeResponse:
+        self.clock.advance(self.advance_seconds)
+        return super().get(url, **kwargs)
+
+
 def _row(day: str, *, close: float = 10.0) -> dict[str, object]:
     return {
         "HGDG_HS_KODU": "THYAO",
@@ -82,7 +111,7 @@ def _client(
         cache_dir=tmp_path,
         max_retries=max_retries,
         request_delay_seconds=kwargs.pop("request_delay_seconds", 0.0),
-        sleep_func=recorded_sleeps.append,
+        sleep_func=kwargs.pop("sleep_func", recorded_sleeps.append),
         random_func=lambda: random_value,
         ssl_verify=True,
         **kwargs,
@@ -345,3 +374,159 @@ def test_refresh_cache_bypasses_existing_entry(tmp_path: Path) -> None:
     assert len(session.calls) == 1
     assert result.loc[0, "HGDG_TARIH"] == pd.Timestamp("2024-01-02")
     assert CACHE_SCHEMA_VERSION in next(tmp_path.glob("*.json")).name
+
+
+def test_security_budget_covers_the_recursive_12_6_3_month_chain(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock()
+    session = AdvancingQueueSession(
+        [
+            requests.Timeout("year"),
+            _response("30-06-2024"),
+        ],
+        clock,
+        advance_seconds=2.0,
+    )
+    client = IsYatirimClient(
+        session=session,
+        cache_dir=tmp_path,
+        max_retries=1,
+        request_delay_seconds=0,
+        sleep_func=clock.sleep,
+        random_func=lambda: 0.0,
+        monotonic_func=clock.monotonic,
+        ssl_verify=True,
+    )
+
+    with pytest.raises(IsYatirimBudgetFetchError) as captured:
+        client.fetch_history(
+            "THYAO",
+            "2024-01-01",
+            "2024-12-31",
+            security_budget_seconds=4,
+            security_started_at=0,
+        )
+
+    assert len(session.calls) == 2
+    assert captured.value.failures[0].error_type == TIME_BUDGET_EXCEEDED
+    assert captured.value.failures[0].start_date == date(2024, 7, 1)
+    assert len(captured.value.partial_data) == 1
+    assert client.stats.time_budget_exceeded_count == 1
+    assert list(tmp_path.glob("*.csv"))
+
+
+def test_budget_expiry_prevents_a_new_retry(tmp_path: Path) -> None:
+    clock = FakeClock()
+    session = AdvancingQueueSession(
+        [requests.Timeout("slow")], clock, advance_seconds=1.0
+    )
+    client = IsYatirimClient(
+        session=session,
+        cache_dir=tmp_path,
+        max_retries=5,
+        request_delay_seconds=0,
+        sleep_func=clock.sleep,
+        random_func=lambda: 0.0,
+        monotonic_func=clock.monotonic,
+        ssl_verify=True,
+    )
+
+    with pytest.raises(IsYatirimBudgetFetchError) as captured:
+        client.fetch_history(
+            "THYAO",
+            "2024-01-01",
+            "2024-12-31",
+            security_budget_seconds=1,
+            security_started_at=0,
+        )
+
+    assert len(session.calls) == 1
+    assert client.stats.retry_count == 0
+    assert captured.value.failures[0].error_type == TIME_BUDGET_EXCEEDED
+
+
+def test_budget_failure_reports_later_unattempted_ranges(tmp_path: Path) -> None:
+    clock = FakeClock()
+    session = AdvancingQueueSession(
+        [requests.Timeout("slow")], clock, advance_seconds=1.0
+    )
+    client = IsYatirimClient(
+        session=session,
+        cache_dir=tmp_path,
+        max_retries=5,
+        request_delay_seconds=0,
+        sleep_func=clock.sleep,
+        random_func=lambda: 0.0,
+        monotonic_func=clock.monotonic,
+        ssl_verify=True,
+    )
+
+    with pytest.raises(IsYatirimBudgetFetchError) as captured:
+        client.fetch_history(
+            "THYAO",
+            "2024-01-01",
+            "2025-12-31",
+            security_budget_seconds=1,
+            security_started_at=0,
+        )
+
+    assert len(session.calls) == 1
+    assert [
+        (item.start_date, item.end_date, item.error_type, item.attempts)
+        for item in captured.value.failures
+    ] == [
+        (date(2024, 1, 1), date(2024, 12, 31), TIME_BUDGET_EXCEEDED, 0),
+        (date(2025, 1, 1), date(2025, 12, 31), TIME_BUDGET_EXCEEDED, 0),
+    ]
+
+
+def test_retry_after_budget_failure_requests_only_the_uncached_range(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock()
+    first_session = AdvancingQueueSession(
+        [requests.Timeout("year"), _response("30-06-2024")],
+        clock,
+        advance_seconds=2.0,
+    )
+    first = IsYatirimClient(
+        session=first_session,
+        cache_dir=tmp_path,
+        max_retries=1,
+        request_delay_seconds=0,
+        sleep_func=clock.sleep,
+        random_func=lambda: 0.0,
+        monotonic_func=clock.monotonic,
+        ssl_verify=True,
+    )
+    with pytest.raises(IsYatirimBudgetFetchError):
+        first.fetch_history(
+            "THYAO",
+            "2024-01-01",
+            "2024-12-31",
+            security_budget_seconds=4,
+            security_started_at=0,
+        )
+
+    second_session = QueueSession([_response("01-07-2024")])
+    second = IsYatirimClient(
+        session=second_session,
+        cache_dir=tmp_path,
+        max_retries=1,
+        request_delay_seconds=0,
+        sleep_func=lambda _: None,
+        random_func=lambda: 0.0,
+        ssl_verify=True,
+    )
+    result = second.fetch_history(
+        "THYAO",
+        "2024-01-01",
+        "2024-12-31",
+        security_budget_seconds=30,
+    )
+
+    assert len(result) == 2
+    assert len(second_session.calls) == 1
+    assert second_session.calls[0]["params"]["startdate"] == "01-07-2024"
+    assert second.stats.cache_hits == 1

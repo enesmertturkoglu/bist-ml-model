@@ -87,9 +87,23 @@ active_universe_as_of_date = 2026-07-29
 master_security_count = 621
 collection_start_date = 2020-03-13
 collection_end_date = 2026-07-29
+first_pass_security_budget_seconds = 1200
+retry_pass_security_budget_seconds = 1800
 ```
 
-Her manifest satırı sonrasında `reports/full_history/collection_status.csv`, `collection_summary.json` ve `run_provenance.json` atomik yenilenir. Kesilmiş koşuda aynı komut yeniden çalıştırılır; fiziksel bütünlükten geçen `COMPLETE` raw/nominal snapshot'lar provider'a yeniden sorulmaz, yalnız eksik/başarısız satırlar sürdürülür. Başarılı snapshot'ı bilinçli yeniden indirmek için açıkça `--refresh` gerekir.
+Birinci tur bütün master securities'i sıralı işler. İş Yatırım için security-geneli bütçe bütün recursive `12→6→3` aylık chunk ve beş retry zincirini kapsar; her alt chunkta sıfırlanmaz. Bütçe dolduğunda yeni request/retry başlamaz ve `TIME_BUDGET_EXCEEDED` kaydedilir; devam eden request kendi timeout sınırına kadar tamamlanabilir. İş Yatırım başarısız olsa bile yFinance çalışır. Her security sonrasında `reports/full_history/collection_status.csv`, `collection_summary.json`, `run_provenance.json`, `collection_gaps.csv` ve `collection_failures.csv` atomik dosya değişimiyle yenilenir.
+
+Satır düzeyi resume kaydı ayrıca `reports/full_history/collection_outcomes.json` içinde latest manifest outcome ve first/retry attempt history olarak atomik tutulur. Yeniden başlatılan process, status/summary/provenance bağlamını aktif evren, manifest ve mapping checksum'larıyla fail-closed doğrular; COMPLETE snapshot'ların fiziksel kullanılabilirliğini tekrar kontrol eder ve first pass'te ilk `UNATTEMPTED` security'den devam eder. Retry sonucu checkpoint edilmiş satıra üçüncü otomatik provider denemesi yapılmaz.
+
+İkinci tur yalnız first-pass `PARTIAL`, retry-edilebilir provider hatalı `FAILED` ve `TIME_BUDGET_EXCEEDED` securities'i işler. `COMPLETE` snapshot'lar ve başarılı İş Yatırım cache parçaları yeniden indirilmez; yalnız unresolved provider/tarih aralıkları istenir. Permanent schema/mapping hataları ve `NO_HISTORY` otomatik retry edilmez; üçüncü otomatik tur yoktur. Bütçeler gerektiğinde açık CLI argümanlarıyla değiştirilebilir:
+
+```powershell
+python -u scripts/run_full_history_pipeline.py `
+  --first-pass-security-budget-seconds 1200 `
+  --retry-pass-security-budget-seconds 1800
+```
+
+Kesilmiş koşuda aynı komut yeniden çalıştırılır; fiziksel bütünlükten geçen `COMPLETE` raw/nominal snapshot'lar provider'a yeniden sorulmaz ve başarılı chunk cache'leri korunur. Başarılı snapshot'ı bilinçli yeniden indirmek için yalnız birinci turda açıkça `--refresh` gerekir; ikinci tur doğrulanmış başarıları hiçbir koşulda yenilemez.
 
 Yalnız preflight çalıştırmak için:
 
@@ -97,7 +111,7 @@ Yalnız preflight çalıştırmak için:
 python scripts/run_full_history_pipeline.py --preflight-only
 ```
 
-Üretim komutu security/provider düzeyinde sıralıdır; İş Yatırım'ın mevcut adaptive 12/6/3 aylık chunk, timeout, retry, backoff ve cache davranışını kullanır. Yeni veya kısa tarihçeli bir ticker'ın eski dönemleri uzun bounded retry süresi doğurabilir. Süreç kesilirse son atomik satır checkpoint'i korunur; `run_provenance.json` experiment-ready olmadığını göstermelidir.
+Üretim komutu security/provider düzeyinde sıralıdır; paralel/agresif provider isteği veya sessiz veri kaynağı fallback'i yoktur. İki tur bitmeden derived zincir başlamaz ve bitmiş collection'da bütün 621 securities `COMPLETE/PARTIAL/FAILED/NO_HISTORY` sınıflarından birindedir. Derived zincire yalnız checksum doğrulamasından geçen `COMPLETE` securities girer; kapsam 621'den küçükse `experiment_ready=false` kalır.
 
 Tam collection tamamlanmadan identity/clean/label/XU100/feature/prediction/fold raporları tam sayılmaz. `ticker_mapping_review.csv` sinyalleri otomatik alias değildir; `NO_HISTORICAL_TICKER_FOUND` da “ticker hiç değişmedi” doğrulaması değildir. Açıklanamayan boşluklar için KAP/Borsa İstanbul kanıtı ayrı incelenir.
 

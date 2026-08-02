@@ -915,6 +915,28 @@ Aktif pay referans verisi, resmî kaynak snapshot'ları, ticker mapping inceleme
 
 2026-07-29
 
+### D035 — İki Turlu Bütçeli Tam Tarihsel Collection
+
+**Karar:**
+
+621-security tam tarihsel collection sıralı iki turla yürütülecektir. Birinci tur bütün master securities için çalışır; İş Yatırım'ın security-geneli `time.monotonic()` wall-clock bütçesi varsayılan `1200` saniyedir. Mevcut `(connect=10, read=60)` timeout, beş deneme ve adaptive `12→6→3` aylık chunk kuralları korunur. Bütçe bütün recursive chunk zincirini kapsar; dolduğunda yeni request veya retry başlatılmaz, devam eden tek request kendi timeout sınırında tamamlanabilir ve sonuç `TIME_BUDGET_EXCEEDED` olarak kaydedilir. Başarılı chunk cache'leri korunur ve İş Yatırım başarısız olsa da yFinance çalışır.
+
+Birinci turdan sonra yalnız `PARTIAL`, retry-edilebilir provider hatalı `FAILED` ve `TIME_BUDGET_EXCEEDED` securities ikinci turda yeniden denenir. İkinci tur İş Yatırım security bütçesi varsayılan `1800` saniyedir; doğrulanmış `COMPLETE` snapshot'lar ve başarılı cache aralıkları yeniden indirilmez. Permanent schema/mapping hataları ve `NO_HISTORY` otomatik retry edilmez. Üçüncü otomatik tur veya sonsuz retry yoktur. Bütçeler CLI üzerinden değiştirilebilir.
+
+Her security her turdan sonra atomik checkpoint'e yazılır ve son durumda tam olarak `COMPLETE`, `PARTIAL`, `FAILED` veya `NO_HISTORY` olur. İki tur tamamen bitmeden derived zincir başlamaz. Derived zincire yalnız fiziksel checksum doğrulamasından geçen `COMPLETE` securities girer; partial panel hiçbir koşulda `experiment_ready=true` olamaz. Eksik provider/tarih aralıkları `collection_gaps.csv`, tamamen başarısız securities `collection_failures.csv`, açıklanamayan seri boşlukları ise otomatik alias üretmeden `ticker_mapping_review.csv` içinde raporlanır.
+
+**Gerekçe:**
+
+Tek bir yavaş veya sorunlu ticker'ın tüm üretim koşusunu saatlerce durdurmasını önlerken başarılı snapshot ve chunk'ların değişmez biçimde korunması, kalan eksiklerin ikinci kontrollü turda tamamlanması ve kısmi kapsamın downstream'e sessizce sızmaması gerekir.
+
+**Etkilenen alanlar:**
+
+İş Yatırım istemcisi, market-data collector, tam tarihsel orchestration, checkpoint/summary/gap/failure/provenance raporları, CLI ve üretim işletimi. D020 ve D024–D034 değiştirilmemiştir.
+
+**Tarih:**
+
+2026-07-31
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

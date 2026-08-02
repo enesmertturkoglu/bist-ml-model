@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -25,7 +26,11 @@ from src.data.active_universe import (
 from src.data.calendar_pipeline import GlobalCalendarPipeline
 from src.data.cleaning import summarize_cleaning
 from src.data.cleaning_pipeline import CleaningSnapshotSet, MarketDataCleaningPipeline
-from src.data.collectors import MarketDataCollector, SourceCollectionResult
+from src.data.collectors import (
+    MarketDataCollector,
+    ProviderGap,
+    SourceCollectionResult,
+)
 from src.data.label_pipeline import LabelGenerationPipeline
 from src.data.labels import summarize_labels
 from src.data.price_limits import PriceStepTable
@@ -50,6 +55,9 @@ DEFAULT_COLLECTION_START_DATE = date(2020, 3, 13)
 DEFAULT_COLLECTION_END_DATE = date(2026, 7, 29)
 DEFAULT_MASTER_SECURITY_COUNT = 621
 DEFAULT_REPORT_ROOT = Path("reports/full_history")
+DEFAULT_FIRST_PASS_SECURITY_BUDGET_SECONDS = 20 * 60.0
+DEFAULT_RETRY_PASS_SECURITY_BUDGET_SECONDS = 30 * 60.0
+OUTCOME_CHECKPOINT_SCHEMA_VERSION = "full_history_manifest_outcomes_v1"
 
 COLLECTION_STATUS_COLUMNS: tuple[str, ...] = (
     "security_id",
@@ -59,6 +67,8 @@ COLLECTION_STATUS_COLUMNS: tuple[str, ...] = (
     "requested_end_date",
     "isyatirim_status",
     "yfinance_status",
+    "nominal_status",
+    "status",
     "raw_snapshot_ids",
     "nominal_snapshot_id",
     "identity_snapshot_id",
@@ -73,7 +83,49 @@ COLLECTION_STATUS_COLUMNS: tuple[str, ...] = (
     "failure_stage",
     "failure_class",
     "failure_reason",
+    "last_successful_stage",
+    "retry_recommended",
+    "last_collection_pass",
+    "elapsed_seconds",
+    "security_budget_seconds",
+    "network_request_count",
+    "cache_hit_count",
+    "retry_count",
+    "timeout_count",
     "mapping_review_required",
+)
+
+COLLECTION_GAP_COLUMNS: tuple[str, ...] = (
+    "security_id",
+    "current_ticker",
+    "provider",
+    "collection_pass",
+    "status",
+    "missing_start_date",
+    "missing_end_date",
+    "failure_stage",
+    "failure_class",
+    "failure_reason",
+    "last_successful_stage",
+    "retry_recommended",
+    "elapsed_seconds",
+    "security_budget_seconds",
+    "network_request_count",
+    "cache_hit_count",
+    "retry_count",
+    "timeout_count",
+)
+
+COLLECTION_FAILURE_COLUMNS: tuple[str, ...] = (
+    "security_id",
+    "current_ticker",
+    "status",
+    "failure_stage",
+    "failure_class",
+    "failure_reason",
+    "last_successful_stage",
+    "retry_recommended",
+    "collection_pass",
 )
 
 MAPPING_REVIEW_COLUMNS: tuple[str, ...] = (
@@ -114,6 +166,12 @@ class FullHistoryContext:
     collection_start_date: date = DEFAULT_COLLECTION_START_DATE
     model_period_start_date: date = DEFAULT_COLLECTION_START_DATE
     collection_end_date: date = DEFAULT_COLLECTION_END_DATE
+    first_pass_security_budget_seconds: float = (
+        DEFAULT_FIRST_PASS_SECURITY_BUDGET_SECONDS
+    )
+    retry_pass_security_budget_seconds: float = (
+        DEFAULT_RETRY_PASS_SECURITY_BUDGET_SECONDS
+    )
 
     def __post_init__(self) -> None:
         if self.collection_start_date < self.model_period_start_date:
@@ -124,6 +182,10 @@ class FullHistoryContext:
             raise FullHistoryError("collection_start_date must not follow collection_end_date")
         if self.master_security_count < 1:
             raise FullHistoryError("master_security_count must be positive")
+        if self.first_pass_security_budget_seconds <= 0:
+            raise FullHistoryError("first-pass security budget must be positive")
+        if self.retry_pass_security_budget_seconds <= 0:
+            raise FullHistoryError("retry-pass security budget must be positive")
 
 
 @dataclass(frozen=True)
@@ -160,19 +222,123 @@ class ManifestOutcome:
     isyatirim_raw_snapshot_id: str
     yfinance_raw_snapshot_id: str
     nominal_snapshot_id: str
+    nominal_status: str = ""
     isyatirim_dates: tuple[str, ...] = ()
     yfinance_dates: tuple[str, ...] = ()
     failure_stage: str = ""
     failure_class: str = ""
     failure_reason: str = ""
+    collection_pass: int = 1
+    gaps: tuple[tuple[str, ProviderGap], ...] = ()
+    last_successful_stage: str = ""
+    retry_recommended: bool = False
+    elapsed_seconds: float = 0.0
+    security_budget_seconds: float = 0.0
+    network_request_count: int = 0
+    cache_hit_count: int = 0
+    retry_count: int = 0
+    timeout_count: int = 0
 
     @property
     def complete(self) -> bool:
         return (
             self.isyatirim_status == SnapshotStatus.COMPLETE.value
             and self.yfinance_status == SnapshotStatus.COMPLETE.value
+            and (self.nominal_status or "COMPLETE")
+            == SnapshotStatus.COMPLETE.value
             and bool(self.nominal_snapshot_id)
         )
+
+
+def manifest_outcome_to_dict(outcome: ManifestOutcome) -> dict[str, Any]:
+    """Serialize one row-level result for deterministic cross-process resume."""
+
+    return {
+        "row_number": outcome.row_number,
+        "security_id": outcome.security_id,
+        "current_ticker": outcome.current_ticker,
+        "provider_ticker": outcome.provider_ticker,
+        "period_start": outcome.period_start,
+        "period_end": outcome.period_end,
+        "isyatirim_status": outcome.isyatirim_status,
+        "yfinance_status": outcome.yfinance_status,
+        "nominal_status": outcome.nominal_status,
+        "isyatirim_raw_snapshot_id": outcome.isyatirim_raw_snapshot_id,
+        "yfinance_raw_snapshot_id": outcome.yfinance_raw_snapshot_id,
+        "nominal_snapshot_id": outcome.nominal_snapshot_id,
+        "isyatirim_dates": list(outcome.isyatirim_dates),
+        "yfinance_dates": list(outcome.yfinance_dates),
+        "failure_stage": outcome.failure_stage,
+        "failure_class": outcome.failure_class,
+        "failure_reason": outcome.failure_reason,
+        "collection_pass": outcome.collection_pass,
+        "gaps": [
+            {
+                "provider": provider,
+                "start_date": gap.start_date,
+                "end_date": gap.end_date,
+                "failure_class": gap.failure_class,
+                "failure_reason": gap.failure_reason,
+                "retry_recommended": gap.retry_recommended,
+            }
+            for provider, gap in outcome.gaps
+        ],
+        "last_successful_stage": outcome.last_successful_stage,
+        "retry_recommended": outcome.retry_recommended,
+        "elapsed_seconds": outcome.elapsed_seconds,
+        "security_budget_seconds": outcome.security_budget_seconds,
+        "network_request_count": outcome.network_request_count,
+        "cache_hit_count": outcome.cache_hit_count,
+        "retry_count": outcome.retry_count,
+        "timeout_count": outcome.timeout_count,
+    }
+
+
+def manifest_outcome_from_dict(value: Mapping[str, Any]) -> ManifestOutcome:
+    """Restore a row-level result written by :func:`manifest_outcome_to_dict`."""
+
+    gaps = tuple(
+        (
+            str(item["provider"]),
+            ProviderGap(
+                start_date=str(item["start_date"]),
+                end_date=str(item["end_date"]),
+                failure_class=str(item["failure_class"]),
+                failure_reason=str(item["failure_reason"]),
+                retry_recommended=bool(item["retry_recommended"]),
+            ),
+        )
+        for item in value.get("gaps", [])
+    )
+    return ManifestOutcome(
+        row_number=int(value["row_number"]),
+        security_id=str(value["security_id"]),
+        current_ticker=str(value["current_ticker"]),
+        provider_ticker=str(value["provider_ticker"]),
+        period_start=str(value["period_start"]),
+        period_end=str(value["period_end"]),
+        isyatirim_status=str(value["isyatirim_status"]),
+        yfinance_status=str(value["yfinance_status"]),
+        nominal_status=str(value.get("nominal_status", "")),
+        isyatirim_raw_snapshot_id=str(value.get("isyatirim_raw_snapshot_id", "")),
+        yfinance_raw_snapshot_id=str(value.get("yfinance_raw_snapshot_id", "")),
+        nominal_snapshot_id=str(value.get("nominal_snapshot_id", "")),
+        isyatirim_dates=tuple(map(str, value.get("isyatirim_dates", []))),
+        yfinance_dates=tuple(map(str, value.get("yfinance_dates", []))),
+        failure_stage=str(value.get("failure_stage", "")),
+        failure_class=str(value.get("failure_class", "")),
+        failure_reason=str(value.get("failure_reason", "")),
+        collection_pass=int(value.get("collection_pass", 1)),
+        gaps=gaps,
+        last_successful_stage=str(value.get("last_successful_stage", "")),
+        retry_recommended=bool(value.get("retry_recommended", False)),
+        elapsed_seconds=float(value.get("elapsed_seconds", 0.0)),
+        security_budget_seconds=float(value.get("security_budget_seconds", 0.0)),
+        network_request_count=int(float(value.get("network_request_count", 0))),
+        cache_hit_count=int(float(value.get("cache_hit_count", 0))),
+        retry_count=int(float(value.get("retry_count", 0))),
+        timeout_count=int(float(value.get("timeout_count", 0))),
+    )
 
 
 @dataclass(frozen=True)
@@ -289,6 +455,8 @@ class FullHistoryPipeline:
         snapshot_store: SnapshotStore | None = None,
         collector: MarketDataCollector | None = None,
         code_commit_sha: str | None = None,
+        monotonic_func: Any = time.monotonic,
+        progress_func: Any = print,
     ) -> None:
         self.config = config or MarketDataConfig()
         self.context = context or FullHistoryContext()
@@ -296,6 +464,9 @@ class FullHistoryPipeline:
         self.snapshot_store = snapshot_store or SnapshotStore(self.config)
         self.collector = collector
         self.code_commit_sha = code_commit_sha
+        self.monotonic_func = monotonic_func
+        self.progress_func = progress_func
+        self._checkpoint_attempt_history: tuple[ManifestOutcome, ...] = ()
 
     def preflight(self) -> FullHistoryPreflight:
         """Fail before provider construction when frozen inputs are inconsistent."""
@@ -445,71 +616,707 @@ class FullHistoryPipeline:
                     )
                 previous_end = row.period_end_ts
 
+    def _load_collection_checkpoint(
+        self, preflight: FullHistoryPreflight
+    ) -> tuple[
+        tuple[ManifestOutcome, ...],
+        tuple[ManifestOutcome, ...],
+        Mapping[str, Any],
+    ]:
+        """Load a consistent row-level checkpoint before constructing new requests."""
+
+        root = self.paths.report_root
+        status_path = root / "collection_status.csv"
+        summary_path = root / "collection_summary.json"
+        provenance_path = root / "run_provenance.json"
+        core_paths = (status_path, summary_path, provenance_path)
+        existing = [path.is_file() for path in core_paths]
+        if not any(existing):
+            return (), (), {}
+        if not all(existing):
+            missing = [str(path) for path in core_paths if not path.is_file()]
+            raise FullHistoryError(
+                f"incomplete collection checkpoint; missing files: {missing}"
+            )
+
+        status = pd.read_csv(status_path, dtype=str, keep_default_na=False)
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        self._validate_checkpoint_context(preflight, status, summary, provenance)
+
+        outcome_path = root / "collection_outcomes.json"
+        latest: tuple[ManifestOutcome, ...] = ()
+        history: tuple[ManifestOutcome, ...] = ()
+        if outcome_path.is_file():
+            try:
+                payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+                if payload.get("schema_version") != OUTCOME_CHECKPOINT_SCHEMA_VERSION:
+                    raise FullHistoryError("collection outcome checkpoint schema mismatch")
+                expected_context = {
+                    "active_universe_snapshot_id": preflight.active_metadata.snapshot_id,
+                    "manifest_file_checksum": preflight.manifest_file_checksum,
+                    "mapping_checksum": preflight.mapping.checksum,
+                }
+                if any(
+                    str(payload.get(key, "")) != str(value)
+                    for key, value in expected_context.items()
+                ):
+                    raise FullHistoryError("collection outcome checkpoint context mismatch")
+                latest = tuple(
+                    manifest_outcome_from_dict(item)
+                    for item in payload.get("latest_outcomes", [])
+                )
+                history = tuple(
+                    manifest_outcome_from_dict(item)
+                    for item in payload.get("attempt_history", [])
+                )
+                self._validate_restored_outcomes(preflight, status, latest)
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError, FullHistoryError) as exc:
+                self._log(
+                    "[COLLECTION][RESUME] row-level checkpoint could not be reused; "
+                    f"rebuilding from audited CSV/JSON reports reason={sanitize_error(exc)}"
+                )
+                latest = ()
+                history = ()
+
+        if not latest:
+            latest = self._bootstrap_outcomes_from_reports(preflight, status)
+            history = latest
+            self._validate_restored_outcomes(preflight, status, latest)
+
+        restorable: list[ManifestOutcome] = []
+        invalid_rows: set[int] = set()
+        for outcome in latest:
+            if self._outcome_complete_snapshots_usable(outcome):
+                restorable.append(outcome)
+            else:
+                invalid_rows.add(outcome.row_number)
+                self._log(
+                    "[COLLECTION][RESUME] unusable COMPLETE snapshot; manifest row "
+                    f"will be recollected row={outcome.row_number} "
+                    f"security_id={outcome.security_id} ticker={outcome.provider_ticker}"
+                )
+        if invalid_rows:
+            history = tuple(
+                item for item in history if item.row_number not in invalid_rows
+            )
+        return tuple(restorable), history, provenance
+
+    def _validate_checkpoint_context(
+        self,
+        preflight: FullHistoryPreflight,
+        status: pd.DataFrame,
+        summary: Mapping[str, Any],
+        provenance: Mapping[str, Any],
+    ) -> None:
+        missing_columns = set(COLLECTION_STATUS_COLUMNS).difference(status.columns)
+        if missing_columns:
+            raise FullHistoryError(
+                f"collection checkpoint fields missing: {sorted(missing_columns)}"
+            )
+        if len(status) != self.context.master_security_count:
+            raise FullHistoryError("collection checkpoint master row count mismatch")
+        if status["security_id"].duplicated().any():
+            raise FullHistoryError("collection checkpoint has duplicate security_id")
+        expected_ids = set(preflight.universe["security_id"].astype(str))
+        if set(status["security_id"].astype(str)) != expected_ids:
+            raise FullHistoryError("collection checkpoint security scope mismatch")
+
+        calculated = build_collection_summary(status)
+        count_fields = (
+            "master_security_count",
+            "attempted_security_count",
+            "complete_security_count",
+            "partial_security_count",
+            "failed_security_count",
+            "no_history_security_count",
+            "unattempted_security_count",
+        )
+        for field_name in count_fields:
+            if int(summary.get(field_name, -1)) != int(calculated[field_name]):
+                raise FullHistoryError(
+                    f"collection checkpoint summary mismatch: {field_name}"
+                )
+            provenance_summary = provenance.get("collection_summary", {})
+            if int(provenance_summary.get(field_name, -1)) != int(
+                calculated[field_name]
+            ):
+                raise FullHistoryError(
+                    f"collection checkpoint provenance mismatch: {field_name}"
+                )
+
+        expected_context = {
+            "active_universe_snapshot_id": preflight.active_metadata.snapshot_id,
+            "universe_version": self.context.universe_version,
+            "active_universe_as_of_date": self.context.active_universe_as_of_date.isoformat(),
+            "master_security_count": self.context.master_security_count,
+            "collection_start_date": self.context.collection_start_date.isoformat(),
+            "collection_end_date": self.context.collection_end_date.isoformat(),
+            "manifest_file_checksum": preflight.manifest_file_checksum,
+            "mapping_checksum": preflight.mapping.checksum,
+        }
+        for field_name, expected in expected_context.items():
+            if str(provenance.get(field_name, "")) != str(expected):
+                raise FullHistoryError(
+                    f"collection checkpoint context mismatch: {field_name}"
+                )
+        if bool(provenance.get("experiment_ready", False)):
+            raise FullHistoryError(
+                "partial collection checkpoint cannot be experiment_ready"
+            )
+
+    def _bootstrap_outcomes_from_reports(
+        self, preflight: FullHistoryPreflight, status: pd.DataFrame
+    ) -> tuple[ManifestOutcome, ...]:
+        """Migrate the pre-row-checkpoint report set without refetching providers."""
+
+        attempted = status.loc[
+            ~status["status"].isin(["PENDING", "UNATTEMPTED"])
+        ].copy()
+        if attempted.empty:
+            return ()
+        manifest_groups = {
+            str(key): group
+            for key, group in preflight.manifest.groupby("security_id", sort=False)
+        }
+        gaps_path = self.paths.report_root / "collection_gaps.csv"
+        gaps = (
+            pd.read_csv(gaps_path, dtype=str, keep_default_na=False)
+            if gaps_path.is_file()
+            else pd.DataFrame(columns=COLLECTION_GAP_COLUMNS)
+        )
+        outcomes: list[ManifestOutcome] = []
+        for checkpoint_row in attempted.itertuples(index=False):
+            security_id = str(checkpoint_row.security_id)
+            planned = manifest_groups[security_id]
+            if len(planned) != 1:
+                raise FullHistoryError(
+                    "legacy checkpoint cannot safely restore a multi-period security: "
+                    f"{security_id}"
+                )
+            row_number = int(planned.index[0])
+            manifest_row = planned.iloc[0]
+            raw_ids = [
+                value
+                for value in str(checkpoint_row.raw_snapshot_ids).split("|")
+                if value
+            ]
+            is_id = self._snapshot_id_for_source(raw_ids, "isyatirim", "raw")
+            yf_id = self._snapshot_id_for_source(raw_ids, "yfinance", "raw")
+            nominal_id = str(checkpoint_row.nominal_snapshot_id)
+            security_gaps = gaps.loc[
+                gaps.get("security_id", pd.Series(dtype=str)).astype(str).eq(security_id)
+            ]
+            gap_values = tuple(
+                (
+                    str(item.provider),
+                    ProviderGap(
+                        start_date=str(item.missing_start_date),
+                        end_date=str(item.missing_end_date),
+                        failure_class=str(item.failure_class),
+                        failure_reason=str(item.failure_reason),
+                        retry_recommended=_text_bool(item.retry_recommended),
+                    ),
+                )
+                for item in security_gaps.itertuples(index=False)
+            )
+            if not gap_values and str(checkpoint_row.status) != "COMPLETE":
+                providers = [
+                    provider
+                    for provider, provider_status in (
+                        ("ISYATIRIM", str(checkpoint_row.isyatirim_status)),
+                        ("YFINANCE", str(checkpoint_row.yfinance_status)),
+                    )
+                    if provider_status != "COMPLETE"
+                ]
+                gap_values = tuple(
+                    (
+                        provider,
+                        ProviderGap(
+                            start_date=str(manifest_row["period_start"]),
+                            end_date=str(manifest_row["period_end"]),
+                            failure_class=str(checkpoint_row.failure_class),
+                            failure_reason=str(checkpoint_row.failure_reason),
+                            retry_recommended=_text_bool(
+                                checkpoint_row.retry_recommended
+                            ),
+                        ),
+                    )
+                    for provider in providers
+                )
+            outcomes.append(
+                ManifestOutcome(
+                    row_number=row_number,
+                    security_id=security_id,
+                    current_ticker=str(manifest_row["current_ticker"]),
+                    provider_ticker=str(manifest_row["provider_ticker"]),
+                    period_start=str(manifest_row["period_start"]),
+                    period_end=str(manifest_row["period_end"]),
+                    isyatirim_status=str(checkpoint_row.isyatirim_status),
+                    yfinance_status=str(checkpoint_row.yfinance_status),
+                    nominal_status=str(checkpoint_row.nominal_status),
+                    isyatirim_raw_snapshot_id=is_id,
+                    yfinance_raw_snapshot_id=yf_id,
+                    nominal_snapshot_id=nominal_id,
+                    isyatirim_dates=self._snapshot_dates(is_id, "HGDG_TARIH"),
+                    yfinance_dates=self._snapshot_dates(yf_id, "date"),
+                    failure_stage=str(checkpoint_row.failure_stage),
+                    failure_class=str(checkpoint_row.failure_class),
+                    failure_reason=str(checkpoint_row.failure_reason),
+                    collection_pass=int(float(checkpoint_row.last_collection_pass)),
+                    gaps=gap_values,
+                    last_successful_stage=str(checkpoint_row.last_successful_stage),
+                    retry_recommended=_text_bool(checkpoint_row.retry_recommended),
+                    elapsed_seconds=float(checkpoint_row.elapsed_seconds or 0),
+                    security_budget_seconds=float(
+                        checkpoint_row.security_budget_seconds or 0
+                    ),
+                    network_request_count=int(
+                        float(checkpoint_row.network_request_count or 0)
+                    ),
+                    cache_hit_count=int(float(checkpoint_row.cache_hit_count or 0)),
+                    retry_count=int(float(checkpoint_row.retry_count or 0)),
+                    timeout_count=int(float(checkpoint_row.timeout_count or 0)),
+                )
+            )
+        self._log(
+            "[COLLECTION][RESUME] migrated audited legacy checkpoint "
+            f"attempted_security_count={len(attempted)}"
+        )
+        return tuple(outcomes)
+
+    def _snapshot_id_for_source(
+        self, snapshot_ids: Sequence[str], source: str, layer: str
+    ) -> str:
+        matches: list[str] = []
+        for snapshot_id in snapshot_ids:
+            metadata = self.snapshot_store.get_snapshot(snapshot_id)
+            if metadata.source == source and metadata.layer == layer:
+                matches.append(snapshot_id)
+        if len(matches) > 1:
+            raise FullHistoryError(
+                f"multiple {source}/{layer} snapshots in one legacy checkpoint row"
+            )
+        return matches[0] if matches else ""
+
+    def _snapshot_dates(self, snapshot_id: str, column: str) -> tuple[str, ...]:
+        if not snapshot_id:
+            return ()
+        metadata = self.snapshot_store.get_snapshot(snapshot_id)
+        return self._observed_dates(metadata, column)
+
+    def _validate_restored_outcomes(
+        self,
+        preflight: FullHistoryPreflight,
+        status: pd.DataFrame,
+        outcomes: Sequence[ManifestOutcome],
+    ) -> None:
+        if len({item.row_number for item in outcomes}) != len(outcomes):
+            raise FullHistoryError("duplicate manifest row in outcome checkpoint")
+        manifest = preflight.manifest
+        for outcome in outcomes:
+            if outcome.row_number not in manifest.index:
+                raise FullHistoryError("outcome checkpoint manifest row is out of range")
+            planned = manifest.loc[outcome.row_number]
+            actual = (
+                outcome.security_id,
+                outcome.current_ticker,
+                outcome.provider_ticker,
+                outcome.period_start,
+                outcome.period_end,
+            )
+            expected = tuple(
+                str(planned[name])
+                for name in (
+                    "security_id",
+                    "current_ticker",
+                    "provider_ticker",
+                    "period_start",
+                    "period_end",
+                )
+            )
+            if actual != expected:
+                raise FullHistoryError("outcome checkpoint manifest identity mismatch")
+        restored_status = build_collection_status(preflight, outcomes)
+        attempted_ids = set(
+            status.loc[
+                ~status["status"].isin(["PENDING", "UNATTEMPTED"]), "security_id"
+            ].astype(str)
+        )
+        restored_ids = set(
+            restored_status.loc[
+                ~restored_status["status"].isin(["PENDING", "UNATTEMPTED"]),
+                "security_id",
+            ].astype(str)
+        )
+        if attempted_ids != restored_ids:
+            raise FullHistoryError("outcome checkpoint attempted scope mismatch")
+
+    def _outcome_complete_snapshots_usable(self, outcome: ManifestOutcome) -> bool:
+        checks = (
+            (outcome.isyatirim_status, outcome.isyatirim_raw_snapshot_id),
+            (outcome.yfinance_status, outcome.yfinance_raw_snapshot_id),
+            (outcome.nominal_status, outcome.nominal_snapshot_id),
+        )
+        for status, snapshot_id in checks:
+            if status == SnapshotStatus.COMPLETE.value:
+                if not snapshot_id:
+                    return False
+                try:
+                    if not self.snapshot_store.is_usable(snapshot_id):
+                        return False
+                except Exception:
+                    return False
+        return True
+
     def collect_manifest(
         self,
         preflight: FullHistoryPreflight,
         *,
         refresh: bool = False,
         run_started_at_utc: str | None = None,
-    ) -> tuple[tuple[ManifestOutcome, ...], pd.DataFrame, Mapping[str, Any]]:
-        """Collect each manifest row sequentially and checkpoint after every row."""
+    ) -> tuple[
+        tuple[ManifestOutcome, ...],
+        pd.DataFrame,
+        Mapping[str, Any],
+        Mapping[str, Any],
+    ]:
+        """Run one complete sequential pass and one bounded missing-data retry pass."""
 
         collector = self.collector or MarketDataCollector(
             self.config,
             snapshot_store=self.snapshot_store,
             ticker_mapping=preflight.mapping,
             code_commit_sha=self.code_commit_sha,
+            monotonic_func=self.monotonic_func,
+            progress_func=self.progress_func,
         )
-        started = run_started_at_utc or _utc_now()
-        outcomes: list[ManifestOutcome] = []
-        for row_number, row in preflight.manifest.iterrows():
-            start = date.fromisoformat(str(row["period_start"]))
-            end = date.fromisoformat(str(row["period_end"]))
-            try:
-                result = collector.collect_ticker(
-                    str(row["provider_ticker"]), start, end, refresh=refresh
+        total = self.context.master_security_count
+        security_order = list(preflight.universe["security_id"].astype(str))
+        manifest_groups = {
+            str(key): group.sort_index()
+            for key, group in preflight.manifest.groupby("security_id", sort=False)
+        }
+        restored, restored_history, checkpoint_provenance = (
+            self._load_collection_checkpoint(preflight)
+        )
+        prior_passes = checkpoint_provenance.get("collection_passes", {})
+        started = str(
+            checkpoint_provenance.get("run_started_at_utc")
+            or run_started_at_utc
+            or _utc_now()
+        )
+        outcomes_by_row: dict[int, ManifestOutcome] = {
+            item.row_number: item for item in restored
+        }
+        attempt_history: list[ManifestOutcome] = list(restored_history)
+        self._checkpoint_attempt_history = tuple(attempt_history)
+        first_pass_by_row: dict[int, ManifestOutcome] = {
+            item.row_number: item
+            for item in attempt_history
+            if item.collection_pass == 1
+        }
+        second_pass_by_row: dict[int, ManifestOutcome] = {
+            item.row_number: item
+            for item in attempt_history
+            if item.collection_pass == 2
+        }
+        first_pass_started = str(
+            prior_passes.get("first_pass_started_at_utc") or _utc_now()
+        )
+        restored_security_count = len({item.security_id for item in restored})
+        if restored_security_count:
+            self._log(
+                "[COLLECTION][RESUME] checkpoint restored "
+                f"attempted_security_count={restored_security_count} "
+                f"next_unattempted_position={restored_security_count + 1}/{total}"
+            )
+        for position, security_id in enumerate(security_order, start=1):
+            rows = manifest_groups[security_id]
+            ticker = str(rows.iloc[0]["current_ticker"])
+            row_numbers = tuple(map(int, rows.index))
+            if all(row_number in first_pass_by_row for row_number in row_numbers):
+                restored_status = build_collection_status(
+                    preflight, tuple(outcomes_by_row.values())
+                ).set_index("security_id").loc[security_id, "status"]
+                self._log(
+                    f"[COLLECTION][PASS 1][{position}/{total}][{ticker}] "
+                    f"checkpoint hit status={restored_status}; provider atlanıyor "
+                    f"security_id={security_id}"
                 )
-                outcome = self._manifest_outcome(row_number, row, result.source_results)
-            except Exception as exc:
-                outcome = ManifestOutcome(
-                    row_number=row_number,
-                    security_id=str(row["security_id"]),
-                    current_ticker=str(row["current_ticker"]),
-                    provider_ticker=str(row["provider_ticker"]),
-                    period_start=start.isoformat(),
-                    period_end=end.isoformat(),
-                    isyatirim_status="FAILED",
-                    yfinance_status="FAILED",
-                    isyatirim_raw_snapshot_id="",
-                    yfinance_raw_snapshot_id="",
-                    nominal_snapshot_id="",
-                    failure_stage="COLLECTION_ORCHESTRATION",
-                    failure_class=type(exc).__name__,
-                    failure_reason=sanitize_error(exc),
+                continue
+            security_started_at = float(self.monotonic_func())
+            self._log(
+                f"[COLLECTION][PASS 1][{position}/{total}][{ticker}] başladı "
+                f"security_id={security_id} budget_seconds="
+                f"{self.context.first_pass_security_budget_seconds:.0f}"
+            )
+            for row_number, row in rows.iterrows():
+                outcome = self._collect_manifest_row(
+                    collector,
+                    int(row_number),
+                    row,
+                    collection_pass=1,
+                    security_position=position,
+                    security_started_at=security_started_at,
+                    security_budget_seconds=(
+                        self.context.first_pass_security_budget_seconds
+                    ),
+                    refresh=refresh,
                 )
-            outcomes.append(outcome)
-            status = build_collection_status(preflight, outcomes)
+                outcomes_by_row[int(row_number)] = outcome
+                first_pass_by_row[int(row_number)] = outcome
+                attempt_history.append(outcome)
+            self._checkpoint_attempt_history = tuple(attempt_history)
+            status = build_collection_status(
+                preflight, tuple(outcomes_by_row.values())
+            )
             summary = build_collection_summary(status)
+            security_status = str(
+                status.set_index("security_id").loc[security_id, "status"]
+            )
+            self._log(
+                f"[COLLECTION][{ticker}] {security_status}, sonraki security'ye "
+                f"geçiliyor pass=1 security_id={security_id} "
+                f"elapsed_seconds={self.monotonic_func() - security_started_at:.3f}"
+            )
             provenance = self._run_provenance(
                 preflight,
                 status,
                 summary,
-                run_status="COLLECTING",
+                run_status="COLLECTING_PASS_1",
                 run_started_at_utc=started,
                 used_security_ids=(),
                 excluded_security_ids=(),
                 snapshots=(),
+                outcomes=tuple(outcomes_by_row.values()),
+                collection_passes={
+                    "first_pass_started_at_utc": first_pass_started,
+                    "first_pass_finished_at_utc": None,
+                    "retry_pass_started_at_utc": None,
+                    "retry_pass_finished_at_utc": None,
+                    "first_pass_security_budget_seconds": self.context.first_pass_security_budget_seconds,
+                    "retry_pass_security_budget_seconds": self.context.retry_pass_security_budget_seconds,
+                },
             )
-            self._write_collection_checkpoint(status, summary, provenance)
+            self._write_collection_checkpoint(
+                status, summary, provenance, tuple(outcomes_by_row.values())
+            )
+
+        first_pass_finished = str(
+            prior_passes.get("first_pass_finished_at_utc") or _utc_now()
+        )
+        first_status = build_collection_status(
+            preflight, tuple(first_pass_by_row.values())
+        )
+        first_summary = build_collection_summary(first_status)
+        retry_ids = tuple(
+            first_status.loc[
+                first_status["status"].eq("PARTIAL")
+                | (
+                    first_status["status"].eq("FAILED")
+                    & first_status["retry_recommended"].eq(True)
+                ),
+                "security_id",
+            ].astype(str)
+        )
+        retry_pass_started = str(
+            prior_passes.get("retry_pass_started_at_utc") or _utc_now()
+        )
+        for security_id in retry_ids:
+            position = security_order.index(security_id) + 1
+            rows = manifest_groups[security_id]
+            ticker = str(rows.iloc[0]["current_ticker"])
+            security_started_at = float(self.monotonic_func())
+            self._log(
+                f"[COLLECTION][PASS 2][{position}/{total}][{ticker}] başladı "
+                f"security_id={security_id} budget_seconds="
+                f"{self.context.retry_pass_security_budget_seconds:.0f}"
+            )
+            attempted_retry = False
+            for row_number, row in rows.iterrows():
+                previous = outcomes_by_row[int(row_number)]
+                if previous.complete:
+                    continue
+                if int(row_number) in second_pass_by_row:
+                    continue
+                outcome = self._collect_manifest_row(
+                    collector,
+                    int(row_number),
+                    row,
+                    collection_pass=2,
+                    security_position=position,
+                    security_started_at=security_started_at,
+                    security_budget_seconds=(
+                        self.context.retry_pass_security_budget_seconds
+                    ),
+                    refresh=False,
+                )
+                outcomes_by_row[int(row_number)] = outcome
+                second_pass_by_row[int(row_number)] = outcome
+                attempt_history.append(outcome)
+                attempted_retry = True
+            if not attempted_retry:
+                self._log(
+                    f"[COLLECTION][PASS 2][{position}/{total}][{ticker}] "
+                    f"checkpoint hit; üçüncü deneme yapılmıyor "
+                    f"security_id={security_id}"
+                )
+                continue
+            self._checkpoint_attempt_history = tuple(attempt_history)
+            status = build_collection_status(
+                preflight, tuple(outcomes_by_row.values())
+            )
+            summary = build_collection_summary(status)
+            security_status = str(
+                status.set_index("security_id").loc[security_id, "status"]
+            )
+            self._log(
+                f"[COLLECTION][{ticker}] {security_status}, retry tamamlandı "
+                f"security_id={security_id} "
+                f"elapsed_seconds={self.monotonic_func() - security_started_at:.3f}"
+            )
+            provenance = self._run_provenance(
+                preflight,
+                status,
+                summary,
+                run_status="COLLECTING_PASS_2",
+                run_started_at_utc=started,
+                used_security_ids=(),
+                excluded_security_ids=(),
+                snapshots=(),
+                outcomes=tuple(outcomes_by_row.values()),
+                collection_passes={
+                    "first_pass_started_at_utc": first_pass_started,
+                    "first_pass_finished_at_utc": first_pass_finished,
+                    "retry_pass_started_at_utc": retry_pass_started,
+                    "retry_pass_finished_at_utc": None,
+                    "first_pass_security_budget_seconds": self.context.first_pass_security_budget_seconds,
+                    "retry_pass_security_budget_seconds": self.context.retry_pass_security_budget_seconds,
+                    "first_pass_result": dict(first_summary),
+                    "retry_security_ids": list(retry_ids),
+                },
+            )
+            self._write_collection_checkpoint(
+                status, summary, provenance, tuple(outcomes_by_row.values())
+            )
+
+        retry_pass_finished = str(
+            prior_passes.get("retry_pass_finished_at_utc") or _utc_now()
+        )
+        self._checkpoint_attempt_history = tuple(attempt_history)
+        outcomes = tuple(
+            outcomes_by_row[index] for index in sorted(outcomes_by_row)
+        )
         final_status = build_collection_status(preflight, outcomes)
         final_summary = build_collection_summary(final_status)
-        return tuple(outcomes), final_status, final_summary
+        first_index = first_status.set_index("security_id")
+        final_index = final_status.set_index("security_id")
+        recovered_ids = tuple(
+            security_id
+            for security_id in retry_ids
+            if first_index.loc[security_id, "status"] != "COMPLETE"
+            and final_index.loc[security_id, "status"] == "COMPLETE"
+        )
+        remaining_ids = tuple(
+            final_status.loc[final_status["status"].ne("COMPLETE"), "security_id"]
+            .astype(str)
+            .sort_values()
+        )
+        collection_passes = {
+            "first_pass_started_at_utc": first_pass_started,
+            "first_pass_finished_at_utc": first_pass_finished,
+            "retry_pass_started_at_utc": retry_pass_started,
+            "retry_pass_finished_at_utc": retry_pass_finished,
+            "first_pass_security_budget_seconds": self.context.first_pass_security_budget_seconds,
+            "retry_pass_security_budget_seconds": self.context.retry_pass_security_budget_seconds,
+            "first_pass_result": dict(first_summary),
+            "retry_security_ids": list(retry_ids),
+            "retry_recovered_security_ids": list(recovered_ids),
+            "retry_remaining_security_ids": list(remaining_ids),
+            "failure_history": [
+                _outcome_history_record(item)
+                for item in attempt_history
+                if item.failure_class or item.gaps
+            ],
+        }
+        return outcomes, final_status, final_summary, collection_passes
+
+    def _collect_manifest_row(
+        self,
+        collector: MarketDataCollector,
+        row_number: int,
+        row: pd.Series,
+        *,
+        collection_pass: int,
+        security_position: int,
+        security_started_at: float,
+        security_budget_seconds: float,
+        refresh: bool,
+    ) -> ManifestOutcome:
+        start = date.fromisoformat(str(row["period_start"]))
+        end = date.fromisoformat(str(row["period_end"]))
+        try:
+            result = collector.collect_ticker(
+                str(row["provider_ticker"]),
+                start,
+                end,
+                refresh=refresh,
+                isyatirim_security_budget_seconds=security_budget_seconds,
+                isyatirim_security_started_at=security_started_at,
+                collection_pass=collection_pass,
+                security_id=str(row["security_id"]),
+                manifest_position=security_position,
+                manifest_total=self.context.master_security_count,
+            )
+            return self._manifest_outcome(
+                row_number,
+                row,
+                result.source_results,
+                collection_pass=collection_pass,
+                elapsed_seconds=float(self.monotonic_func()) - security_started_at,
+                security_budget_seconds=security_budget_seconds,
+            )
+        except Exception as exc:
+            gap = ProviderGap(
+                start_date=start.isoformat(),
+                end_date=end.isoformat(),
+                failure_class=type(exc).__name__,
+                failure_reason=sanitize_error(exc),
+                retry_recommended=True,
+            )
+            return ManifestOutcome(
+                row_number=row_number,
+                security_id=str(row["security_id"]),
+                current_ticker=str(row["current_ticker"]),
+                provider_ticker=str(row["provider_ticker"]),
+                period_start=start.isoformat(),
+                period_end=end.isoformat(),
+                isyatirim_status="FAILED",
+                yfinance_status="FAILED",
+                nominal_status="FAILED",
+                isyatirim_raw_snapshot_id="",
+                yfinance_raw_snapshot_id="",
+                nominal_snapshot_id="",
+                failure_stage="COLLECTION_ORCHESTRATION",
+                failure_class=type(exc).__name__,
+                failure_reason=sanitize_error(exc),
+                collection_pass=collection_pass,
+                gaps=(("COLLECTION_ORCHESTRATION", gap),),
+                retry_recommended=True,
+                elapsed_seconds=float(self.monotonic_func()) - security_started_at,
+                security_budget_seconds=security_budget_seconds,
+            )
 
     def _manifest_outcome(
         self,
         row_number: int,
         row: pd.Series,
         results: Sequence[SourceCollectionResult],
+        *,
+        collection_pass: int,
+        elapsed_seconds: float,
+        security_budget_seconds: float,
     ) -> ManifestOutcome:
         by_source = {item.source: item for item in results}
         isyatirim = by_source["isyatirim"]
@@ -517,6 +1324,29 @@ class FullHistoryPipeline:
         nominal = yfinance.derived_snapshots[0] if yfinance.derived_snapshots else None
         failures = [item for item in (isyatirim, yfinance) if item.failure_reason]
         last_failure = failures[-1] if failures else None
+        gaps = tuple(
+            (source.source.upper(), gap)
+            for source in (isyatirim, yfinance)
+            for gap in source.missing_ranges
+        )
+        metrics = {
+            key: int(
+                sum(float(source.metrics.get(key, 0)) for source in (isyatirim, yfinance))
+            )
+            for key in (
+                "network_request_count",
+                "cache_hit_count",
+                "retry_count",
+                "timeout_count",
+            )
+        }
+        last_successful_stage = ""
+        if isyatirim.raw_snapshot.snapshot_status is SnapshotStatus.COMPLETE:
+            last_successful_stage = "ISYATIRIM_RAW"
+        if yfinance.raw_snapshot.snapshot_status is SnapshotStatus.COMPLETE:
+            last_successful_stage = "YFINANCE_RAW"
+        if nominal is not None and nominal.snapshot_status is SnapshotStatus.COMPLETE:
+            last_successful_stage = "YFINANCE_NOMINAL"
         return ManifestOutcome(
             row_number=row_number,
             security_id=str(row["security_id"]),
@@ -525,10 +1355,9 @@ class FullHistoryPipeline:
             period_start=str(row["period_start"]),
             period_end=str(row["period_end"]),
             isyatirim_status=isyatirim.raw_snapshot.snapshot_status.value,
-            yfinance_status=(
-                SnapshotStatus.COMPLETE.value
-                if yfinance.complete
-                else yfinance.raw_snapshot.snapshot_status.value
+            yfinance_status=yfinance.raw_snapshot.snapshot_status.value,
+            nominal_status=(
+                nominal.snapshot_status.value if nominal is not None else "FAILED"
             ),
             isyatirim_raw_snapshot_id=isyatirim.raw_snapshot.snapshot_id,
             yfinance_raw_snapshot_id=yfinance.raw_snapshot.snapshot_id,
@@ -544,6 +1373,18 @@ class FullHistoryPipeline:
             failure_reason=(
                 sanitize_error(last_failure.failure_reason) if last_failure else ""
             ),
+            collection_pass=collection_pass,
+            gaps=gaps,
+            last_successful_stage=last_successful_stage,
+            retry_recommended=any(
+                item.retry_recommended for item in (isyatirim, yfinance)
+            ),
+            elapsed_seconds=elapsed_seconds,
+            security_budget_seconds=security_budget_seconds,
+            network_request_count=metrics["network_request_count"],
+            cache_hit_count=metrics["cache_hit_count"],
+            retry_count=metrics["retry_count"],
+            timeout_count=metrics["timeout_count"],
         )
 
     def _observed_dates(
@@ -562,11 +1403,41 @@ class FullHistoryPipeline:
         status: pd.DataFrame,
         summary: Mapping[str, Any],
         provenance: Mapping[str, Any],
+        outcomes: Sequence[ManifestOutcome] = (),
     ) -> None:
         root = self.paths.report_root
         atomic_write_csv(root / "collection_status.csv", status)
         atomic_write_json(root / "collection_summary.json", summary)
         atomic_write_json(root / "run_provenance.json", provenance)
+        atomic_write_csv(
+            root / "collection_gaps.csv",
+            build_collection_gaps(status, outcomes),
+        )
+        atomic_write_csv(
+            root / "collection_failures.csv",
+            build_collection_failures(status),
+        )
+        latest = tuple(sorted(outcomes, key=lambda item: item.row_number))
+        history = self._checkpoint_attempt_history or latest
+        atomic_write_json(
+            root / "collection_outcomes.json",
+            {
+                "schema_version": OUTCOME_CHECKPOINT_SCHEMA_VERSION,
+                "active_universe_snapshot_id": provenance.get(
+                    "active_universe_snapshot_id", ""
+                ),
+                "manifest_file_checksum": provenance.get(
+                    "manifest_file_checksum", ""
+                ),
+                "mapping_checksum": provenance.get("mapping_checksum", ""),
+                "latest_outcomes": [
+                    manifest_outcome_to_dict(item) for item in latest
+                ],
+                "attempt_history": [
+                    manifest_outcome_to_dict(item) for item in history
+                ],
+            },
+        )
 
     def _run_provenance(
         self,
@@ -579,8 +1450,16 @@ class FullHistoryPipeline:
         used_security_ids: Sequence[str],
         excluded_security_ids: Sequence[str],
         snapshots: Sequence[SnapshotMetadata],
+        outcomes: Sequence[ManifestOutcome] = (),
+        collection_passes: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        snapshot_rows = _snapshot_provenance_rows(
+            self.snapshot_store,
+            outcomes,
+            snapshots,
+            used_security_ids=used_security_ids,
+        )
+        result = {
             "run_status": run_status,
             "run_started_at_utc": run_started_at_utc,
             "last_checkpoint_at_utc": _utc_now(),
@@ -600,17 +1479,26 @@ class FullHistoryPipeline:
             "mapping_checksum": preflight.mapping.checksum,
             "mapping_file_checksum": preflight.mapping_file_checksum,
             "collection_summary": dict(summary),
+            "collection_passes": dict(collection_passes or {}),
             "used_security_ids": sorted(map(str, used_security_ids)),
             "excluded_security_ids": sorted(map(str, excluded_security_ids)),
             "snapshot_lineage": {
                 item.dataset_type: {
                     "snapshot_id": item.snapshot_id,
                     "content_checksum": item.content_checksum,
+                    "input_snapshot_ids": list(item.input_snapshot_ids),
+                    "row_count": item.row_count,
+                    "snapshot_status": item.snapshot_status.value,
                     "source": item.source,
                     "layer": item.layer,
+                    "used_security_count": len(used_security_ids),
                 }
                 for item in snapshots
             },
+            "snapshots": snapshot_rows,
+            "collection_snapshot_lineage": _collection_snapshot_lineage(
+                snapshot_rows
+            ),
             "experiment_ready": bool(
                 run_status == "COMPLETE"
                 and len(used_security_ids) == self.context.master_security_count
@@ -618,7 +1506,14 @@ class FullHistoryPipeline:
             "lightgbm_training_run": False,
             "experiment_log_created": False,
             "status_row_count": int(len(status)),
+            "derived_chain_started": bool(snapshots),
         }
+        result.update(dict(collection_passes or {}))
+        return result
+
+    def _log(self, message: str) -> None:
+        if self.progress_func is not None:
+            self.progress_func(message)
 
     def run_derived(
         self,
@@ -775,11 +1670,15 @@ class FullHistoryPipeline:
 
         started = run_started_at_utc or _utc_now()
         preflight = self.preflight()
-        outcomes, status, summary = self.collect_manifest(
+        outcomes, status, summary, collection_passes = self.collect_manifest(
             preflight,
             refresh=refresh,
             run_started_at_utc=started,
         )
+        if status["status"].isin(["PENDING", "UNATTEMPTED"]).any():
+            raise FullHistoryError(
+                "collection passes finished with PENDING/UNATTEMPTED securities"
+            )
         complete_ids = tuple(
             sorted(
                 status.loc[status["collection_complete"].eq(True), "security_id"].astype(str)
@@ -826,13 +1725,15 @@ class FullHistoryPipeline:
             used_security_ids=complete_ids,
             excluded_security_ids=excluded_ids,
             snapshots=derived.snapshot_metadata if derived is not None else (),
+            outcomes=outcomes,
+            collection_passes=collection_passes,
         )
         if derived_error is not None:
             provenance["derived_failure"] = {
                 "failure_class": type(derived_error).__name__,
                 "failure_reason": sanitize_error(derived_error),
             }
-        self._write_collection_checkpoint(status, summary, provenance)
+        self._write_collection_checkpoint(status, summary, provenance, outcomes)
         return FullHistoryRunResult(
             run_status=run_status,
             preflight=preflight,
@@ -979,6 +1880,14 @@ def build_collection_status(
         yf_status = _aggregate_provider_status(
             [item.yfinance_status for item in completed], len(planned)
         )
+        nominal_status = _aggregate_provider_status(
+            [
+                item.nominal_status
+                or ("COMPLETE" if item.nominal_snapshot_id else "FAILED")
+                for item in completed
+            ],
+            len(planned),
+        )
         dates = sorted(
             {
                 value
@@ -1005,6 +1914,40 @@ def build_collection_status(
         is_complete = len(completed) == len(planned) and all(
             item.complete for item in completed
         )
+        attempted = bool(completed)
+        no_history = bool(
+            attempted
+            and not is_complete
+            and not dates
+            and any(
+                re.search(
+                    r"(?i)(?:no rows|no history|not found|delisted|symbol)",
+                    item.failure_reason,
+                )
+                for item in completed
+            )
+        )
+        any_success = any(
+            value in {"COMPLETE", "PARTIAL"}
+            for item in completed
+            for value in (
+                item.isyatirim_status,
+                item.yfinance_status,
+                item.nominal_status
+                or ("COMPLETE" if item.nominal_snapshot_id else "FAILED"),
+            )
+        )
+        security_status = (
+            "UNATTEMPTED"
+            if not attempted
+            else "COMPLETE"
+            if is_complete
+            else "NO_HISTORY"
+            if no_history
+            else "PARTIAL"
+            if any_success
+            else "FAILED"
+        )
         provider_mismatch = any(
             set(item.isyatirim_dates) != set(item.yfinance_dates)
             for item in completed
@@ -1021,6 +1964,8 @@ def build_collection_status(
                 "requested_end_date": str(planned["period_end"].max()),
                 "isyatirim_status": is_status,
                 "yfinance_status": yf_status,
+                "nominal_status": nominal_status,
+                "status": security_status,
                 "raw_snapshot_ids": "|".join(raw_ids),
                 "nominal_snapshot_id": "|".join(nominal_ids),
                 "identity_snapshot_id": "",
@@ -1035,6 +1980,28 @@ def build_collection_status(
                 "failure_stage": failure.failure_stage if failure else "",
                 "failure_class": failure.failure_class if failure else "",
                 "failure_reason": failure.failure_reason if failure else "",
+                "last_successful_stage": (
+                    failure.last_successful_stage if failure else ""
+                ),
+                "retry_recommended": bool(
+                    any(item.retry_recommended for item in completed)
+                    and security_status not in {"COMPLETE", "NO_HISTORY"}
+                ),
+                "last_collection_pass": max(
+                    (item.collection_pass for item in completed), default=0
+                ),
+                "elapsed_seconds": max(
+                    (item.elapsed_seconds for item in completed), default=0.0
+                ),
+                "security_budget_seconds": max(
+                    (item.security_budget_seconds for item in completed), default=0.0
+                ),
+                "network_request_count": sum(
+                    item.network_request_count for item in completed
+                ),
+                "cache_hit_count": sum(item.cache_hit_count for item in completed),
+                "retry_count": sum(item.retry_count for item in completed),
+                "timeout_count": sum(item.timeout_count for item in completed),
                 "mapping_review_required": bool(failure or provider_mismatch),
             }
         )
@@ -1042,38 +2009,49 @@ def build_collection_status(
 
 
 def build_collection_summary(status: pd.DataFrame) -> dict[str, Any]:
-    attempted = ~(
-        status["isyatirim_status"].eq("PENDING")
-        & status["yfinance_status"].eq("PENDING")
-    )
-    complete = status["collection_complete"].eq(True)
-    no_history = (
-        attempted
-        & ~complete
-        & pd.to_numeric(status["observed_session_count"], errors="coerce").fillna(0).eq(0)
-        & status["failure_reason"].astype(str).str.contains(
-            r"(?i)(?:no rows|no history|not found|delisted|symbol)", regex=True
-        )
-    )
-    any_success = status["isyatirim_status"].eq("COMPLETE") | status[
-        "yfinance_status"
-    ].eq("COMPLETE")
-    partial = attempted & ~complete & ~no_history & any_success
-    failed = attempted & ~complete & ~no_history & ~partial
+    security_status = status.get(
+        "status", pd.Series("UNATTEMPTED", index=status.index)
+    ).astype(str)
+    attempted = ~security_status.isin(["PENDING", "UNATTEMPTED"])
+    complete = security_status.eq("COMPLETE")
+    partial = security_status.eq("PARTIAL")
+    failed = security_status.eq("FAILED")
+    no_history = security_status.eq("NO_HISTORY")
+    unattempted = ~attempted
     denominator = max(int(attempted.sum()), 1)
+    last_pass = pd.to_numeric(
+        status.get("last_collection_pass", pd.Series(0, index=status.index)),
+        errors="coerce",
+    ).fillna(0)
     return {
         "master_security_count": int(len(status)),
+        "attempted_security_count": int(attempted.sum()),
         "collection_attempted_count": int(attempted.sum()),
         "complete_security_count": int(complete.sum()),
         "partial_security_count": int(partial.sum()),
         "failed_security_count": int(failed.sum()),
         "no_history_security_count": int(no_history.sum()),
+        "unattempted_security_count": int(unattempted.sum()),
         "isyatirim_success_rate": float(
             (status.loc[attempted, "isyatirim_status"].eq("COMPLETE").sum()) / denominator
         ),
         "yfinance_success_rate": float(
             (status.loc[attempted, "yfinance_status"].eq("COMPLETE").sum()) / denominator
         ),
+        "nominal_success_rate": float(
+            (
+                status.loc[attempted, "nominal_status"].eq("COMPLETE").sum()
+                if "nominal_status" in status
+                else status.loc[attempted, "yfinance_status"].eq("COMPLETE").sum()
+            )
+            / denominator
+        ),
+        "provider_success_rate_denominator": "attempted_security_count; PENDING/UNATTEMPTED excluded",
+        "first_pass_complete_count": int((complete & last_pass.eq(1)).sum()),
+        "retry_pass_attempted_count": int(last_pass.eq(2).sum()),
+        "retry_pass_recovered_count": int((complete & last_pass.eq(2)).sum()),
+        "retry_pass_remaining_partial_count": int((partial & last_pass.eq(2)).sum()),
+        "retry_pass_remaining_failed_count": int((failed & last_pass.eq(2)).sum()),
         "identity_success_rate": float(
             status.loc[attempted, "identity_snapshot_id"].astype(str).ne("").sum()
             / denominator
@@ -1087,6 +2065,61 @@ def build_collection_summary(status: pd.DataFrame) -> dict[str, Any]:
             / denominator
         ),
     }
+
+
+def build_collection_gaps(
+    status: pd.DataFrame,
+    outcomes: Sequence[ManifestOutcome],
+) -> pd.DataFrame:
+    """Render one auditable row for every unresolved provider/date range."""
+
+    status_by_security = status.set_index("security_id")["status"].astype(str)
+    rows: list[dict[str, Any]] = []
+    for outcome in sorted(
+        outcomes,
+        key=lambda item: (item.security_id, item.collection_pass, item.row_number),
+    ):
+        security_status = str(status_by_security.get(outcome.security_id, "UNATTEMPTED"))
+        if security_status == "COMPLETE":
+            continue
+        for provider, gap in outcome.gaps:
+            rows.append(
+                {
+                    "security_id": outcome.security_id,
+                    "current_ticker": outcome.current_ticker,
+                    "provider": provider,
+                    "collection_pass": outcome.collection_pass,
+                    "status": security_status,
+                    "missing_start_date": gap.start_date,
+                    "missing_end_date": gap.end_date,
+                    "failure_stage": provider,
+                    "failure_class": gap.failure_class,
+                    "failure_reason": sanitize_error(gap.failure_reason),
+                    "last_successful_stage": outcome.last_successful_stage,
+                    "retry_recommended": bool(gap.retry_recommended),
+                    "elapsed_seconds": round(outcome.elapsed_seconds, 6),
+                    "security_budget_seconds": outcome.security_budget_seconds,
+                    "network_request_count": outcome.network_request_count,
+                    "cache_hit_count": outcome.cache_hit_count,
+                    "retry_count": outcome.retry_count,
+                    "timeout_count": outcome.timeout_count,
+                }
+            )
+    return pd.DataFrame(rows, columns=COLLECTION_GAP_COLUMNS)
+
+
+def build_collection_failures(status: pd.DataFrame) -> pd.DataFrame:
+    """Keep completely missing/failed securities separate from partial gaps."""
+
+    selected = status.loc[status["status"].isin(["FAILED", "NO_HISTORY"])].copy()
+    if selected.empty:
+        return pd.DataFrame(columns=COLLECTION_FAILURE_COLUMNS)
+    return (
+        selected.rename(columns={"last_collection_pass": "collection_pass"})
+        .loc[:, COLLECTION_FAILURE_COLUMNS]
+        .sort_values(["status", "security_id"])
+        .reset_index(drop=True)
+    )
 
 
 def enrich_collection_status(
@@ -1465,6 +2498,94 @@ def _aggregate_provider_status(values: Sequence[str], expected_count: int) -> st
     return "FAILED"
 
 
+def _outcome_history_record(outcome: ManifestOutcome) -> dict[str, Any]:
+    return {
+        "security_id": outcome.security_id,
+        "current_ticker": outcome.current_ticker,
+        "provider_ticker": outcome.provider_ticker,
+        "collection_pass": outcome.collection_pass,
+        "period_start": outcome.period_start,
+        "period_end": outcome.period_end,
+        "isyatirim_status": outcome.isyatirim_status,
+        "yfinance_status": outcome.yfinance_status,
+        "nominal_status": outcome.nominal_status,
+        "failure_stage": outcome.failure_stage,
+        "failure_class": outcome.failure_class,
+        "failure_reason": outcome.failure_reason,
+        "gaps": [
+            {
+                "provider": provider,
+                "missing_start_date": gap.start_date,
+                "missing_end_date": gap.end_date,
+                "failure_class": gap.failure_class,
+                "failure_reason": sanitize_error(gap.failure_reason),
+                "retry_recommended": gap.retry_recommended,
+            }
+            for provider, gap in outcome.gaps
+        ],
+    }
+
+
+def _snapshot_provenance_rows(
+    store: SnapshotStore,
+    outcomes: Sequence[ManifestOutcome],
+    derived: Sequence[SnapshotMetadata],
+    *,
+    used_security_ids: Sequence[str],
+) -> list[dict[str, Any]]:
+    used = set(map(str, used_security_ids))
+    snapshot_security: dict[str, str] = {}
+    for outcome in outcomes:
+        for snapshot_id in (
+            outcome.isyatirim_raw_snapshot_id,
+            outcome.yfinance_raw_snapshot_id,
+            outcome.nominal_snapshot_id,
+        ):
+            if snapshot_id:
+                snapshot_security[snapshot_id] = outcome.security_id
+    metadata_by_id: dict[str, SnapshotMetadata] = {}
+    for snapshot_id in sorted(snapshot_security):
+        try:
+            metadata_by_id[snapshot_id] = store.get_snapshot(snapshot_id)
+        except Exception:
+            continue
+    for metadata in derived:
+        metadata_by_id[metadata.snapshot_id] = metadata
+    rows: list[dict[str, Any]] = []
+    for snapshot_id, metadata in sorted(metadata_by_id.items()):
+        security_id = snapshot_security.get(snapshot_id, "")
+        rows.append(
+            {
+                "snapshot_id": metadata.snapshot_id,
+                "content_checksum": metadata.content_checksum,
+                "input_snapshot_ids": list(metadata.input_snapshot_ids),
+                "row_count": metadata.row_count,
+                "snapshot_status": metadata.snapshot_status.value,
+                "source": metadata.source,
+                "layer": metadata.layer,
+                "used_security_count": (
+                    int(security_id in used) if security_id else len(used)
+                ),
+                "security_id": security_id,
+            }
+        )
+    return rows
+
+
+def _collection_snapshot_lineage(
+    snapshot_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {}
+    for row in snapshot_rows:
+        security_id = str(row.get("security_id", ""))
+        if not security_id:
+            continue
+        result.setdefault(security_id, []).append(
+            {key: value for key, value in row.items() if key != "security_id"}
+        )
+    return result
+
+
 def _internal_gap_dates(
     observed: set[pd.Timestamp], calendar_dates: Sequence[pd.Timestamp]
 ) -> tuple[tuple[pd.Timestamp, ...], int]:
@@ -1483,6 +2604,10 @@ def _internal_gap_dates(
         else:
             current = 0
     return missing, longest
+
+
+def _text_bool(value: object) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
 def _date_text(value: object) -> str:

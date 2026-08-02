@@ -1,6 +1,6 @@
 # DATA DICTIONARY
 
-**Belge son güncellemesi:** 2026-07-29
+**Belge son güncellemesi:** 2026-07-31
 
 **Kaynak sütunu kabul doğrulaması:** 2026-07-27
 
@@ -512,16 +512,24 @@ Daily Precision@K tarih satırı `requested_k`, `effective_k`, `selected_count`,
 | `security_id`, `current_ticker` | D034 master kimliği ve as-of ticker |
 | `provider_tickers_queried` | Tamamlanan manifest satırlarında sorgulanan gerçek provider ticker'ları |
 | `requested_start_date`, `requested_end_date` | Security'nin bağlayıcı manifest kapsamı |
-| `isyatirim_status`, `yfinance_status` | Security dönemlerinin toplu `PENDING/COMPLETE/PARTIAL/FAILED` durumu; yFinance `COMPLETE` nominal üretimini de gerektirir |
+| `isyatirim_status`, `yfinance_status`, `nominal_status` | Security dönemlerinin ayrı İş Yatırım raw, yFinance raw ve yFinance nominal toplu `PENDING/COMPLETE/PARTIAL/FAILED` durumu |
+| `status` | İki tur sonundaki security sınıfı: `COMPLETE`, `PARTIAL`, `FAILED`, `NO_HISTORY`; bitmiş koşuda `PENDING/UNATTEMPTED` kalamaz |
 | `raw_snapshot_ids`, `nominal_snapshot_id` | Fiziksel olarak doğrulanmış değişmez kaynak/nominal ID'leri |
 | `identity_snapshot_id`, `clean_snapshot_id`, `label_snapshot_id` | Derived zincir tamamlandıysa security kapsamını taşıyan batch snapshot'ları |
 | `first_observed_date`, `last_observed_date`, `observed_session_count` | Provider gözlem kapsamı |
 | `missing_session_count`, `longest_internal_gap_sessions` | Doğrulanmış global takvime göre eksik toplam ve en uzun iç boşluk |
 | `collection_complete` | Bütün manifest dönemlerinde iki raw provider ve nominal zincirinin doğrulanmış `COMPLETE` olması |
-| `failure_stage`, `failure_class`, `failure_reason` | Son başarısız aşama ve hassas değerleri redakte edilmiş exception bilgisi |
+| `failure_stage`, `failure_class`, `failure_reason`, `last_successful_stage` | Son başarısız aşama, hassas değerleri redakte edilmiş exception bilgisi ve kesinti öncesi son başarılı aşama |
+| `retry_recommended`, `last_collection_pass` | Hatanın ikinci tur için retry-edilebilirliği ve security'nin son işlendiği tur (`1` veya `2`) |
+| `elapsed_seconds`, `security_budget_seconds` | Security İş Yatırım zincirinde `time.monotonic()` ile ölçülen geçen süre ve ilgili turun toplam bütçesi |
+| `network_request_count`, `cache_hit_count`, `retry_count`, `timeout_count` | Son security sonucunun provider/cache telemetri sayaçları |
 | `mapping_review_required` | Geç/erken seri, iç boşluk, provider kapsam farkı veya provider hatası nedeniyle resmî inceleme gereği |
 
-`collection_summary.json` master/attempted/complete/partial/failed/no-history sayılarını ve İş Yatırım, yFinance, identity, clean, label başarı oranlarını verir. `run_provenance.json`; aktif evren snapshot/checksum, manifest checksum, mapping sürüm/checksum, kod/run durumu, kullanılan/dışlanan security listeleri ve derived snapshot lineage'ını taşır. `PARTIAL`, kesilmiş veya derived zinciri tamamlanmamış koşu `experiment_ready=false` kalır.
+`collection_gaps.csv`, her unresolved provider/tarih aralığını ayrı satırda `security_id`, ticker, provider, collection pass, durum, eksik başlangıç/bitiş, failure stage/class/reason, son başarılı aşama, retry önerisi, elapsed/budget ve request/cache/retry/timeout sayaçlarıyla taşır. Bütçe kesintisinde hem aktif hata aralığı hem de henüz request başlatılmamış sonraki aralıklar `TIME_BUDGET_EXCEEDED` olarak eksiksiz yazılır; doğrulanmış cache kapsamı gap sayılmaz. `collection_failures.csv` tamamen başarısız veya `NO_HISTORY` securities'i partial aralıklardan ayırır. `ticker_mapping_review.csv` açıklanamayan seri başlangıcı/bitişi/iç boşlukları için `OFFICIAL_EVIDENCE_REQUIRED` üretir; alias önermez.
+
+`collection_outcomes.json`, processler arası gerçek resume için `full_history_manifest_outcomes_v1` şemasını kullanır. Bağlam alanları aktif evren snapshot ID, manifest checksum ve mapping checksum'dur. `latest_outcomes` her manifest satırının son sonucunu; `attempt_history` ise first/retry pass geçmişini, provider durumlarını, snapshot ID'lerini, gerçek gap aralıklarını, hata/telemetri alanlarını ve collection pass numarasını saklar. Dosya her security checkpoint'inde atomik değiştirilir. Eski status/summary/provenance checkpoint'i yalnız tek manifest dönemli security satırlarında fail-closed doğrulamayla bu şemaya migrate edilebilir; COMPLETE olarak geri yüklenen her snapshot fiziksel checksum kontrolünden geçmelidir.
+
+`collection_summary.json` master/attempted/complete/partial/failed/no-history/unattempted sayılarını; İş Yatırım raw, yFinance raw ve nominal başarı oranlarını; first-pass complete, retry attempted/recovered ve retry sonrası remaining partial/failed sayaçlarını verir. Provider oranlarının denominator'ı `attempted_security_count` olup `PENDING/UNATTEMPTED` securities dahil edilmez. `run_provenance.json`; iki turun başlangıç/bitiş zamanlarını, `1200/1800` varsayılan veya CLI ile verilen bütçeleri, first-pass sonucunu, retry/recovered/remaining listelerini, hata geçmişini, kullanılan/dışlanan security listelerini ve her snapshot için ID/checksum/input IDs/row count/status/source/layer/used-security-count alanlarını taşır. `PARTIAL`, kesilmiş veya derived zinciri tamamlanmamış koşu `experiment_ready=false` kalır.
 
 `ticker_mapping_review.csv` geç başlangıç, erken bitiş, her uzunluktaki iç oturum boşluğu, provider kapsam uyuşmazlığı, symbol/redirect, iki sağlayıcıda tarihçe yokluğu ve olası ticker geçiş sinyalini raporlar. `possible_historical_ticker` yalnız resmî kanıtla doldurulabilir; orchestration alias tahmin etmez ve ana mapping CSV'sini değiştirmez.
 

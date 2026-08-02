@@ -19,7 +19,9 @@ from src.data.full_history_pipeline import (  # noqa: E402
     DEFAULT_AS_OF_DATE,
     DEFAULT_COLLECTION_END_DATE,
     DEFAULT_COLLECTION_START_DATE,
+    DEFAULT_FIRST_PASS_SECURITY_BUDGET_SECONDS,
     DEFAULT_MASTER_SECURITY_COUNT,
+    DEFAULT_RETRY_PASS_SECURITY_BUDGET_SECONDS,
     FullHistoryContext,
     FullHistoryPaths,
     FullHistoryPipeline,
@@ -88,6 +90,24 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Validate frozen inputs and exit before constructing provider clients",
     )
+    parser.add_argument(
+        "--first-pass-security-budget-seconds",
+        type=float,
+        default=DEFAULT_FIRST_PASS_SECURITY_BUDGET_SECONDS,
+        help=(
+            "Total monotonic wall-clock budget for one security's complete İş "
+            "Yatırım 12/6/3-month request/retry chain in pass 1 (default: 1200)"
+        ),
+    )
+    parser.add_argument(
+        "--retry-pass-security-budget-seconds",
+        type=float,
+        default=DEFAULT_RETRY_PASS_SECURITY_BUDGET_SECONDS,
+        help=(
+            "Total monotonic wall-clock budget for one security's missing-range "
+            "İş Yatırım retry chain in pass 2 (default: 1800)"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -101,6 +121,12 @@ def main() -> int:
         collection_start_date=args.start_date,
         model_period_start_date=DEFAULT_COLLECTION_START_DATE,
         collection_end_date=args.end_date,
+        first_pass_security_budget_seconds=(
+            args.first_pass_security_budget_seconds
+        ),
+        retry_pass_security_budget_seconds=(
+            args.retry_pass_security_budget_seconds
+        ),
     )
     paths = FullHistoryPaths(
         manifest=args.manifest,

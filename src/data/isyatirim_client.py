@@ -31,6 +31,7 @@ BASE_URL = (
 CACHE_SCHEMA_VERSION = "v1"
 TRANSIENT_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
 IDENTITY_COLUMNS = {"HGDG_HS_KODU", "HGDG_TARIH"}
+TIME_BUDGET_EXCEEDED = "TIME_BUDGET_EXCEEDED"
 
 try:
     import truststore
@@ -58,6 +59,10 @@ class IsYatirimSchemaError(IsYatirimClientError):
 
 class TransientProviderError(IsYatirimClientError):
     """A provider response that can reasonably succeed on a later attempt."""
+
+
+class IsYatirimTimeBudgetExceeded(IsYatirimClientError):
+    """Raised when a security-wide collection budget prevents a new request."""
 
 
 @dataclass
@@ -115,6 +120,7 @@ class ClientStats:
     failed_chunks: int = 0
     successful_network_chunks: int = 0
     cache_corruption_count: int = 0
+    time_budget_exceeded_count: int = 0
     failures: list[RequestFailure] = field(default_factory=list)
     cache_issues: list[CacheIssue] = field(default_factory=list)
 
@@ -140,11 +146,42 @@ class IsYatirimFetchError(IsYatirimClientError):
         super().__init__(" | ".join(failure.format() for failure in self.failures))
 
 
+class IsYatirimBudgetFetchError(IsYatirimFetchError):
+    """A fetch stopped because its shared security budget was exhausted."""
+
+
 @dataclass
 class _AttemptFailure(Exception):
     error: Exception
     attempts: int
     saw_timeout: bool
+
+
+@dataclass(frozen=True)
+class _SecurityBudget:
+    started_at: float
+    seconds: float
+    monotonic_func: Callable[[], float]
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return max(0.0, float(self.monotonic_func()) - self.started_at)
+
+    @property
+    def remaining_seconds(self) -> float:
+        return max(0.0, self.seconds - self.elapsed_seconds)
+
+    @property
+    def exhausted(self) -> bool:
+        return self.elapsed_seconds >= self.seconds
+
+
+@dataclass(frozen=True)
+class _ProgressContext:
+    collection_pass: int
+    security_id: str
+    manifest_position: int
+    manifest_total: int
 
 
 def _coerce_date(value: date | str | pd.Timestamp) -> date:
@@ -226,6 +263,8 @@ class IsYatirimClient:
         backoff_cap_seconds: float = 30.0,
         jitter_max_seconds: float = 0.5,
         ssl_verify: bool = DEFAULT_SSL_VERIFY,
+        monotonic_func: Callable[[], float] = time.monotonic,
+        progress_func: Callable[[str], None] | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -248,6 +287,10 @@ class IsYatirimClient:
         self.backoff_cap_seconds = float(backoff_cap_seconds)
         self.jitter_max_seconds = float(jitter_max_seconds)
         self.ssl_verify = ssl_verify
+        self.monotonic_func = monotonic_func
+        self.progress_func = progress_func
+        self._active_budget: _SecurityBudget | None = None
+        self._progress_context: _ProgressContext | None = None
         self.stats = ClientStats(
             configured_timeout_seconds=self.timeout_seconds,
             configured_max_retries=self.max_retries,
@@ -261,6 +304,13 @@ class IsYatirimClient:
         ticker: str,
         start_date: date | str | pd.Timestamp,
         end_date: date | str | pd.Timestamp,
+        *,
+        security_budget_seconds: float | None = None,
+        security_started_at: float | None = None,
+        collection_pass: int = 1,
+        security_id: str = "",
+        manifest_position: int = 0,
+        manifest_total: int = 0,
     ) -> pd.DataFrame:
         ticker = ticker.strip().upper()
         if not ticker:
@@ -269,39 +319,101 @@ class IsYatirimClient:
         end = _coerce_date(end_date)
         if start > end:
             raise ValueError("start_date must be on or before end_date")
+        if security_budget_seconds is not None and security_budget_seconds <= 0:
+            raise ValueError("security_budget_seconds must be positive")
 
-        frames: list[pd.DataFrame] = []
-        failures: list[RequestFailure] = []
-        for annual_start, annual_end in split_date_range(start, end, 12):
-            cached_frames: list[pd.DataFrame] = []
-            gaps = [(annual_start, annual_end)]
-            if not self.refresh_cache:
-                cached_frames, gaps = self._load_cached_coverage(
-                    ticker, annual_start, annual_end
-                )
-                frames.extend(cached_frames)
-            cache_used = bool(cached_frames)
-            for gap_start, gap_end in gaps:
-                try:
-                    frames.extend(
-                        self._fetch_range(
-                            ticker,
-                            gap_start,
-                            gap_end,
-                            chunk_months=12,
-                            inherited_timeout=False,
-                            cache_used=cache_used,
-                        )
+        previous_budget = self._active_budget
+        previous_context = self._progress_context
+        self._active_budget = (
+            _SecurityBudget(
+                started_at=(
+                    float(security_started_at)
+                    if security_started_at is not None
+                    else float(self.monotonic_func())
+                ),
+                seconds=float(security_budget_seconds),
+                monotonic_func=self.monotonic_func,
+            )
+            if security_budget_seconds is not None
+            else None
+        )
+        self._progress_context = _ProgressContext(
+            collection_pass=int(collection_pass),
+            security_id=str(security_id),
+            manifest_position=int(manifest_position),
+            manifest_total=int(manifest_total),
+        )
+        try:
+            frames: list[pd.DataFrame] = []
+            failures: list[RequestFailure] = []
+            annual_ranges = split_date_range(start, end, 12)
+            for annual_index, (annual_start, annual_end) in enumerate(annual_ranges):
+                cached_frames: list[pd.DataFrame] = []
+                gaps = [(annual_start, annual_end)]
+                if not self.refresh_cache:
+                    cached_frames, gaps = self._load_cached_coverage(
+                        ticker, annual_start, annual_end
                     )
-                except IsYatirimFetchError as error:
-                    failures.extend(error.failures)
-                    if not error.partial_data.empty:
-                        frames.append(error.partial_data)
+                    frames.extend(cached_frames)
+                cache_used = bool(cached_frames)
+                for gap_index, (gap_start, gap_end) in enumerate(gaps):
+                    try:
+                        frames.extend(
+                            self._fetch_range(
+                                ticker,
+                                gap_start,
+                                gap_end,
+                                chunk_months=12,
+                                inherited_timeout=False,
+                                cache_used=cache_used,
+                            )
+                        )
+                    except IsYatirimBudgetFetchError as error:
+                        failures.extend(error.failures)
+                        if not error.partial_data.empty:
+                            frames.append(error.partial_data)
+                        failures.extend(
+                            self._unattempted_budget_failures(
+                                ticker,
+                                gaps[gap_index + 1 :],
+                                chunk_months=12,
+                                cache_used=cache_used,
+                            )
+                        )
+                        for pending_start, pending_end in annual_ranges[
+                            annual_index + 1 :
+                        ]:
+                            pending_cached: list[pd.DataFrame] = []
+                            pending_gaps = [(pending_start, pending_end)]
+                            if not self.refresh_cache:
+                                pending_cached, pending_gaps = self._load_cached_coverage(
+                                    ticker, pending_start, pending_end
+                                )
+                                frames.extend(pending_cached)
+                            failures.extend(
+                                self._unattempted_budget_failures(
+                                    ticker,
+                                    pending_gaps,
+                                    chunk_months=12,
+                                    cache_used=bool(pending_cached),
+                                )
+                            )
+                        combined = _merge_frames(frames, start, end)
+                        raise IsYatirimBudgetFetchError(
+                            failures, partial_data=combined
+                        ) from error
+                    except IsYatirimFetchError as error:
+                        failures.extend(error.failures)
+                        if not error.partial_data.empty:
+                            frames.append(error.partial_data)
 
-        combined = _merge_frames(frames, start, end)
-        if failures:
-            raise IsYatirimFetchError(failures, partial_data=combined)
-        return combined
+            combined = _merge_frames(frames, start, end)
+            if failures:
+                raise IsYatirimFetchError(failures, partial_data=combined)
+            return combined
+        finally:
+            self._active_budget = previous_budget
+            self._progress_context = previous_context
 
     def _fetch_range(
         self,
@@ -317,6 +429,25 @@ class IsYatirimClient:
             frame, saw_timeout = self._request_with_retries(
                 ticker, start, end, chunk_months=chunk_months
             )
+        except IsYatirimTimeBudgetExceeded as error:
+            failure = RequestFailure(
+                ticker=ticker,
+                start_date=start,
+                end_date=end,
+                attempts=0,
+                chunk_months=chunk_months,
+                error_type=TIME_BUDGET_EXCEEDED,
+                message=str(error),
+                cache_used=cache_used,
+            )
+            self.stats.failed_chunks += 1
+            self.stats.time_budget_exceeded_count += 1
+            self.stats.failures.append(failure)
+            self._log(
+                f"[ISYATIRIM][{ticker}] security budget aşıldı "
+                f"failure_class={TIME_BUDGET_EXCEEDED} {self._timing_text()}"
+            )
+            raise IsYatirimBudgetFetchError([failure]) from error
         except IsYatirimClientError as error:
             failure = RequestFailure(
                 ticker=ticker,
@@ -352,10 +483,18 @@ class IsYatirimClient:
                 self.stats.split_to_six_month_count += 1
             elif next_months == 3:
                 self.stats.split_to_three_month_count += 1
+            self._log(
+                f"[ISYATIRIM][{ticker}] {chunk_months}M başarısız, "
+                f"{next_months}M chunklara bölünüyor "
+                f"range={start.isoformat()}..{end.isoformat()} "
+                f"failure_class={type(attempt_failure.error).__name__} "
+                f"{self._timing_text()}"
+            )
 
             child_frames: list[pd.DataFrame] = []
             child_failures: list[RequestFailure] = []
-            for child_start, child_end in split_date_range(start, end, next_months):
+            child_ranges = split_date_range(start, end, next_months)
+            for child_index, (child_start, child_end) in enumerate(child_ranges):
                 try:
                     child_frames.extend(
                         self._fetch_range(
@@ -369,6 +508,22 @@ class IsYatirimClient:
                             cache_used=cache_used,
                         )
                     )
+                except IsYatirimBudgetFetchError as child_error:
+                    child_failures.extend(child_error.failures)
+                    if not child_error.partial_data.empty:
+                        child_frames.append(child_error.partial_data)
+                    child_failures.extend(
+                        self._unattempted_budget_failures(
+                            ticker,
+                            child_ranges[child_index + 1 :],
+                            chunk_months=next_months,
+                            cache_used=cache_used,
+                        )
+                    )
+                    partial = _merge_frames(child_frames, start, end)
+                    raise IsYatirimBudgetFetchError(
+                        child_failures, partial_data=partial
+                    ) from child_error
                 except IsYatirimFetchError as child_error:
                     child_failures.extend(child_error.failures)
                     if not child_error.partial_data.empty:
@@ -391,18 +546,47 @@ class IsYatirimClient:
             return 3
         return None
 
+    @staticmethod
+    def _unattempted_budget_failures(
+        ticker: str,
+        ranges: Iterable[tuple[date, date]],
+        *,
+        chunk_months: int,
+        cache_used: bool,
+    ) -> list[RequestFailure]:
+        return [
+            RequestFailure(
+                ticker=ticker,
+                start_date=start,
+                end_date=end,
+                attempts=0,
+                chunk_months=chunk_months,
+                error_type=TIME_BUDGET_EXCEEDED,
+                message="security budget exhausted before range was attempted",
+                cache_used=cache_used,
+            )
+            for start, end in ranges
+        ]
+
     def _request_with_retries(
         self, ticker: str, start: date, end: date, *, chunk_months: int
     ) -> tuple[pd.DataFrame, bool]:
         last_error: Exception | None = None
         saw_timeout = False
         for attempt in range(1, self.max_retries + 1):
+            self._ensure_budget_available(ticker, start, end, chunk_months)
             retry_after_seconds: float | None = None
             if attempt > 1:
                 self.stats.retry_count += 1
             self._pace_request()
+            self._ensure_budget_available(ticker, start, end, chunk_months)
             self._count_request_size(chunk_months)
             self.stats.network_requests += 1
+            self._log(
+                f"[ISYATIRIM][{ticker}][{start.isoformat()}..{end.isoformat()}]"
+                f"[{chunk_months}M] request başladı attempt={attempt}/{self.max_retries} "
+                f"{self._timing_text()}"
+            )
             try:
                 response = self.session.get(
                     BASE_URL,
@@ -444,13 +628,25 @@ class IsYatirimClient:
                 raise IsYatirimClientError(str(error)) from error
 
             if attempt < self.max_retries:
+                if self._budget_exhausted():
+                    raise IsYatirimTimeBudgetExceeded(
+                        f"security budget exhausted before retry {attempt + 1}/{self.max_retries}"
+                    )
+                error_class = (
+                    "timeout" if isinstance(last_error, requests.Timeout) else type(last_error).__name__
+                )
+                self._log(
+                    f"[ISYATIRIM][{ticker}][{start.isoformat()}..{end.isoformat()}] "
+                    f"{error_class}, retry {attempt + 1}/{self.max_retries} "
+                    f"{self._timing_text()}"
+                )
                 backoff = min(
                     self.backoff_base_seconds * (2 ** (attempt - 1)),
                     self.backoff_cap_seconds,
                 )
                 if retry_after_seconds is not None:
                     backoff = max(backoff, retry_after_seconds)
-                self.sleep_func(backoff + self._jitter())
+                self._sleep_with_budget(backoff + self._jitter())
         assert last_error is not None
         raise _AttemptFailure(last_error, self.max_retries, saw_timeout)
 
@@ -500,7 +696,50 @@ class IsYatirimClient:
 
     def _pace_request(self) -> None:
         if self.stats.network_requests:
-            self.sleep_func(self.request_delay_seconds + self._jitter())
+            self._sleep_with_budget(self.request_delay_seconds + self._jitter())
+
+    def _sleep_with_budget(self, seconds: float) -> None:
+        delay = max(0.0, float(seconds))
+        if self._active_budget is not None:
+            delay = min(delay, self._active_budget.remaining_seconds)
+        if delay > 0:
+            self.sleep_func(delay)
+
+    def _budget_exhausted(self) -> bool:
+        return self._active_budget is not None and self._active_budget.exhausted
+
+    def _ensure_budget_available(
+        self,
+        ticker: str,
+        start: date,
+        end: date,
+        chunk_months: int,
+    ) -> None:
+        if self._budget_exhausted():
+            raise IsYatirimTimeBudgetExceeded(
+                f"{ticker} {start.isoformat()}..{end.isoformat()} {chunk_months}M "
+                "request/retry was not started"
+            )
+
+    def _timing_text(self) -> str:
+        if self._active_budget is None:
+            return "elapsed_seconds=NA remaining_budget_seconds=NA"
+        return (
+            f"elapsed_seconds={self._active_budget.elapsed_seconds:.3f} "
+            f"remaining_budget_seconds={self._active_budget.remaining_seconds:.3f}"
+        )
+
+    def _log(self, message: str) -> None:
+        if self.progress_func is None:
+            return
+        context = self._progress_context
+        suffix = ""
+        if context is not None:
+            suffix = (
+                f" pass={context.collection_pass} security_id={context.security_id or 'NA'} "
+                f"manifest_position={context.manifest_position}/{context.manifest_total}"
+            )
+        self.progress_func(message + suffix)
 
     def _jitter(self) -> float:
         value = float(self.random_func())
@@ -619,6 +858,10 @@ class IsYatirimClient:
                 gaps.append((cursor, covered_start - timedelta(days=1)))
             frames.append(frame)
             self.stats.cache_hits += 1
+            self._log(
+                f"[ISYATIRIM][{ticker}][{covered_start.isoformat()}.."
+                f"{covered_end.isoformat()}] cache hit {self._timing_text()}"
+            )
             cursor = max(cursor, covered_end + timedelta(days=1))
             if cursor > end:
                 break

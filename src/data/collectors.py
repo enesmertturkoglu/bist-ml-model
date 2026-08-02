@@ -5,15 +5,21 @@ from __future__ import annotations
 import importlib.metadata
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 import pandas as pd
 
 from src.config import MarketDataConfig, SnapshotStatus
-from src.data.isyatirim_client import IsYatirimClient, IsYatirimFetchError
+from src.data.isyatirim_client import (
+    TIME_BUDGET_EXCEEDED,
+    IsYatirimBudgetFetchError,
+    IsYatirimClient,
+    IsYatirimFetchError,
+    IsYatirimSchemaError,
+)
 from src.data.security_identity import (
     TickerMapping,
     normalize_ticker,
@@ -58,12 +64,24 @@ ISYATIRIM_SNAPSHOT_REQUIRED_COLUMNS = {
 
 
 @dataclass(frozen=True)
+class ProviderGap:
+    start_date: str
+    end_date: str
+    failure_class: str
+    failure_reason: str
+    retry_recommended: bool
+
+
+@dataclass(frozen=True)
 class SourceCollectionResult:
     source: str
     raw_snapshot: SnapshotMetadata
     derived_snapshots: tuple[SnapshotMetadata, ...] = ()
     failure_class: str | None = None
     failure_reason: str | None = None
+    missing_ranges: tuple[ProviderGap, ...] = ()
+    metrics: Mapping[str, int | float] = field(default_factory=dict)
+    retry_recommended: bool = False
 
     @property
     def complete(self) -> bool:
@@ -96,6 +114,8 @@ class MarketDataCollector:
         sleep_func: Callable[[float], None] = time.sleep,
         code_commit_sha: str | None = None,
         ticker_mapping: TickerMapping | None = None,
+        monotonic_func: Callable[[], float] = time.monotonic,
+        progress_func: Callable[[str], None] | None = None,
     ) -> None:
         self.config = config or MarketDataConfig()
         self.snapshot_store = snapshot_store or SnapshotStore(self.config)
@@ -106,11 +126,16 @@ class MarketDataCollector:
             minimum_chunk_months=is_config.minimum_chunk_months or 3,
             request_delay_seconds=is_config.request_delay_seconds,
             cache_dir=self.config.isyatirim_cache_root,
+            monotonic_func=monotonic_func,
+            progress_func=progress_func,
         )
         self.yfinance_fetcher = yfinance_fetcher or _fetch_yfinance_history
         self.sleep_func = sleep_func
         self.code_commit_sha = code_commit_sha or current_code_commit_sha()
         self.ticker_mapping = ticker_mapping
+        self.monotonic_func = monotonic_func
+        self.progress_func = progress_func
+        self._last_yfinance_metrics: dict[str, int | float] = {}
         self.isyatirim_version = _package_version("isyatirimhisse")
         self.yfinance_version = _package_version("yfinance")
 
@@ -121,16 +146,41 @@ class MarketDataCollector:
         end_date: date,
         *,
         refresh: bool = False,
+        security_budget_seconds: float | None = None,
+        security_started_at: float | None = None,
+        collection_pass: int = 1,
+        security_id: str = "",
+        manifest_position: int = 0,
+        manifest_total: int = 0,
     ) -> SourceCollectionResult:
         ticker = normalize_ticker(ticker)
         request = self.isyatirim_request(ticker, start_date, end_date)
         if not refresh:
             existing = self.snapshot_store.find_usable_snapshot(request)
             if existing is not None:
-                return SourceCollectionResult("isyatirim", existing)
+                self._log(
+                    f"[ISYATIRIM][{ticker}][{start_date.isoformat()}.."
+                    f"{end_date.isoformat()}] verified COMPLETE snapshot cache hit"
+                )
+                return SourceCollectionResult(
+                    "isyatirim", existing, metrics={"cache_hit_count": 1}
+                )
         frame: pd.DataFrame | None = None
+        before = _isyatirim_metric_counters(self.isyatirim_client)
         try:
-            frame = self.isyatirim_client.fetch_history(ticker, start_date, end_date)
+            budget_kwargs: dict[str, Any] = {}
+            if security_budget_seconds is not None:
+                budget_kwargs = {
+                    "security_budget_seconds": security_budget_seconds,
+                    "security_started_at": security_started_at,
+                    "collection_pass": collection_pass,
+                    "security_id": security_id,
+                    "manifest_position": manifest_position,
+                    "manifest_total": manifest_total,
+                }
+            frame = self.isyatirim_client.fetch_history(
+                ticker, start_date, end_date, **budget_kwargs
+            )
             if frame.empty:
                 raise ValueError(f"İş Yatırım returned no rows for {ticker}")
             _require_columns(
@@ -143,20 +193,52 @@ class MarketDataCollector:
             written = self.snapshot_store.record_failed_attempt(
                 request, error, partial_data=error.partial_data
             )
-            failure = (type(error).__name__, str(error))
+            budget_exceeded = isinstance(error, IsYatirimBudgetFetchError) or any(
+                item.error_type == TIME_BUDGET_EXCEEDED for item in error.failures
+            )
+            failure_class = (
+                TIME_BUDGET_EXCEEDED if budget_exceeded else type(error).__name__
+            )
+            failure = (failure_class, str(error))
+            gaps = tuple(
+                ProviderGap(
+                    start_date=item.start_date.isoformat(),
+                    end_date=item.end_date.isoformat(),
+                    failure_class=item.error_type,
+                    failure_reason=item.message,
+                    retry_recommended=item.error_type != "IsYatirimSchemaError",
+                )
+                for item in error.failures
+            )
         except Exception as error:  # provider/schema failures must be auditable
             written = self.snapshot_store.record_failed_attempt(
                 request, error, partial_data=frame
             )
             failure = (type(error).__name__, str(error))
+            gaps = (
+                ProviderGap(
+                    start_date=start_date.isoformat(),
+                    end_date=end_date.isoformat(),
+                    failure_class=type(error).__name__,
+                    failure_reason=str(error),
+                    retry_recommended=not isinstance(
+                        error, (IsYatirimSchemaError, ValueError)
+                    ),
+                ),
+            )
         else:
             written = self.snapshot_store.save_dataframe(frame, request)
             failure = (None, None)
+            gaps = ()
+        metrics = _metric_delta(before, _isyatirim_metric_counters(self.isyatirim_client))
         return SourceCollectionResult(
             "isyatirim",
             written.metadata,
             failure_class=failure[0],
             failure_reason=failure[1],
+            missing_ranges=gaps,
+            metrics=metrics,
+            retry_recommended=any(item.retry_recommended for item in gaps),
         )
 
     def collect_yfinance(
@@ -183,7 +265,10 @@ class MarketDataCollector:
             )
             if nominal_existing is not None:
                 return SourceCollectionResult(
-                    "yfinance", raw_existing, (nominal_existing,)
+                    "yfinance",
+                    raw_existing,
+                    (nominal_existing,),
+                    metrics={"cache_hit_count": 2},
                 )
             try:
                 prepared = self.snapshot_store.read_dataframe(raw_existing)
@@ -206,6 +291,19 @@ class MarketDataCollector:
                 (derived_written.metadata,),
                 failure_class=failure[0],
                 failure_reason=failure[1],
+                missing_ranges=(
+                    ProviderGap(
+                        start_date=start_date.isoformat(),
+                        end_date=end_date.isoformat(),
+                        failure_class=str(failure[0]),
+                        failure_reason=str(failure[1]),
+                        retry_recommended=True,
+                    ),
+                )
+                if failure[0]
+                else (),
+                metrics={"cache_hit_count": 1},
+                retry_recommended=bool(failure[0]),
             )
         raw: pd.DataFrame | None = None
         try:
@@ -231,6 +329,17 @@ class MarketDataCollector:
                 written.metadata,
                 failure_class=type(error).__name__,
                 failure_reason=str(error),
+                missing_ranges=(
+                    ProviderGap(
+                        start_date=start_date.isoformat(),
+                        end_date=end_date.isoformat(),
+                        failure_class=type(error).__name__,
+                        failure_reason=str(error),
+                        retry_recommended=not isinstance(error, ValueError),
+                    ),
+                ),
+                metrics=self._last_yfinance_metrics,
+                retry_recommended=not isinstance(error, ValueError),
             )
 
         raw_written = self.snapshot_store.save_dataframe(prepared, raw_request)
@@ -259,6 +368,19 @@ class MarketDataCollector:
             (derived_written.metadata,),
             failure_class=failure[0],
             failure_reason=failure[1],
+            missing_ranges=(
+                ProviderGap(
+                    start_date=start_date.isoformat(),
+                    end_date=end_date.isoformat(),
+                    failure_class=str(failure[0]),
+                    failure_reason=str(failure[1]),
+                    retry_recommended=True,
+                ),
+            )
+            if failure[0]
+            else (),
+            metrics=self._last_yfinance_metrics,
+            retry_recommended=bool(failure[0]),
         )
 
     def collect_ticker(
@@ -268,18 +390,37 @@ class MarketDataCollector:
         end_date: date,
         *,
         refresh: bool = False,
+        isyatirim_security_budget_seconds: float | None = None,
+        isyatirim_security_started_at: float | None = None,
+        collection_pass: int = 1,
+        security_id: str = "",
+        manifest_position: int = 0,
+        manifest_total: int = 0,
     ) -> TickerCollectionResult:
         """Run both providers even if one source returns a failed snapshot."""
 
         normalized_ticker = normalize_ticker(ticker)
-        results = (
-            self.collect_isyatirim(
-                normalized_ticker, start_date, end_date, refresh=refresh
-            ),
-            self.collect_yfinance(
-                normalized_ticker, start_date, end_date, refresh=refresh
-            ),
+        isyatirim = self.collect_isyatirim(
+            normalized_ticker,
+            start_date,
+            end_date,
+            refresh=refresh,
+            security_budget_seconds=isyatirim_security_budget_seconds,
+            security_started_at=isyatirim_security_started_at,
+            collection_pass=collection_pass,
+            security_id=security_id,
+            manifest_position=manifest_position,
+            manifest_total=manifest_total,
         )
+        self._log(
+            f"[YFINANCE][{normalized_ticker}][{start_date.isoformat()}.."
+            f"{end_date.isoformat()}] collection başladı pass={collection_pass} "
+            f"security_id={security_id or 'NA'}"
+        )
+        yfinance = self.collect_yfinance(
+            normalized_ticker, start_date, end_date, refresh=refresh
+        )
+        results = (isyatirim, yfinance)
         return TickerCollectionResult(normalized_ticker, results)
 
     def collect_many(
@@ -379,8 +520,15 @@ class MarketDataCollector:
     ) -> pd.DataFrame:
         settings = self.config.yfinance
         last_error: Exception | None = None
+        self._last_yfinance_metrics = {
+            "network_request_count": 0,
+            "cache_hit_count": 0,
+            "retry_count": 0,
+            "timeout_count": 0,
+        }
         for attempt in range(1, settings.max_retries + 1):
             try:
+                self._last_yfinance_metrics["network_request_count"] += 1
                 frame = self.yfinance_fetcher(
                     ticker,
                     start_date,
@@ -392,13 +540,39 @@ class MarketDataCollector:
                 return frame
             except Exception as error:
                 last_error = error
+                if isinstance(error, TimeoutError):
+                    self._last_yfinance_metrics["timeout_count"] += 1
                 if attempt < settings.max_retries:
+                    self._last_yfinance_metrics["retry_count"] += 1
                     self.sleep_func(settings.retry_backoff_seconds * attempt)
         assert last_error is not None
         raise RuntimeError(
             f"yFinance failed for {ticker} after {settings.max_retries} attempts: "
             f"{last_error}"
         ) from last_error
+
+    def _log(self, message: str) -> None:
+        if self.progress_func is not None:
+            self.progress_func(message)
+
+
+def _isyatirim_metric_counters(client: object) -> dict[str, int | float]:
+    stats = getattr(client, "stats", None)
+    return {
+        "network_request_count": int(getattr(stats, "network_requests", 0)),
+        "cache_hit_count": int(getattr(stats, "cache_hits", 0)),
+        "retry_count": int(getattr(stats, "retry_count", 0)),
+        "timeout_count": int(getattr(stats, "timeout_count", 0)),
+    }
+
+
+def _metric_delta(
+    before: Mapping[str, int | float], after: Mapping[str, int | float]
+) -> dict[str, int | float]:
+    return {
+        key: max(0, float(after.get(key, 0)) - float(before.get(key, 0)))
+        for key in after
+    }
 
 
 def _fetch_yfinance_history(

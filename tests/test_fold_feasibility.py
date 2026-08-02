@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +15,25 @@ from src.modeling.fold_feasibility import (
 )
 from src.modeling.prediction_universe import build_prediction_universe
 from tests.modeling_support import synthetic_frames
+
+
+def test_fold_feasibility_module_has_no_lightgbm_import_or_training_call() -> None:
+    source = Path("src/modeling/fold_feasibility.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    }
+    called_names = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+
+    assert not any(name.startswith("lightgbm") for name in imported)
+    assert "train_lightgbm" not in called_names
 
 
 def _dataset(sessions: int = 375):

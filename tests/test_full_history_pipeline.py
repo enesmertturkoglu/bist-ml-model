@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 import hashlib
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -17,10 +18,13 @@ from src.data.full_history_pipeline import (
     FullHistoryPipeline,
     ManifestOutcome,
     atomic_write_text,
+    build_collection_failures,
+    build_collection_gaps,
     build_collection_status,
     build_collection_summary,
     build_mapping_review,
 )
+from src.data.collectors import ProviderGap
 from src.data.security_identity import MAPPING_COLUMNS, TickerMapping, generate_security_id
 from src.data.snapshot_store import SnapshotRequest, SnapshotStore
 
@@ -270,3 +274,378 @@ def test_atomic_checkpoint_failure_preserves_previous_file(
 
     assert target.read_text(encoding="utf-8") == "previous\n"
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_summary_counts_unattempted_and_nominal_success_rate(tmp_path: Path) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    preflight = pipeline.preflight()
+    first = preflight.manifest.iloc[0]
+    status = build_collection_status(
+        preflight, [_complete(0, str(first.security_id), str(first.current_ticker))]
+    )
+
+    summary = build_collection_summary(status)
+
+    assert summary["attempted_security_count"] == 1
+    assert summary["unattempted_security_count"] == 1
+    assert summary["nominal_success_rate"] == 1.0
+    assert summary["provider_success_rate_denominator"].startswith(
+        "attempted_security_count"
+    )
+
+
+def test_gap_and_failure_reports_preserve_real_missing_ranges(
+    tmp_path: Path,
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    preflight = pipeline.preflight()
+    first = preflight.manifest.iloc[0]
+    gap = ProviderGap(
+        start_date="2020-07-01",
+        end_date="2020-12-31",
+        failure_class="TIME_BUDGET_EXCEEDED",
+        failure_reason="budget exhausted",
+        retry_recommended=True,
+    )
+    outcome = ManifestOutcome(
+        row_number=0,
+        security_id=str(first.security_id),
+        current_ticker=str(first.current_ticker),
+        provider_ticker=str(first.provider_ticker),
+        period_start=str(first.period_start),
+        period_end=str(first.period_end),
+        isyatirim_status="PARTIAL",
+        yfinance_status="FAILED",
+        nominal_status="FAILED",
+        isyatirim_raw_snapshot_id="partial-is",
+        yfinance_raw_snapshot_id="failed-yf",
+        nominal_snapshot_id="",
+        failure_stage="ISYATIRIM",
+        failure_class="TIME_BUDGET_EXCEEDED",
+        failure_reason="budget exhausted",
+        collection_pass=2,
+        gaps=(("ISYATIRIM", gap),),
+        last_successful_stage="ISYATIRIM_RAW",
+        retry_recommended=True,
+        elapsed_seconds=1800.0,
+        security_budget_seconds=1800.0,
+        network_request_count=3,
+        cache_hit_count=2,
+        retry_count=1,
+        timeout_count=1,
+    )
+    status = build_collection_status(preflight, [outcome])
+
+    gaps = build_collection_gaps(status, [outcome])
+    failures = build_collection_failures(status)
+
+    assert gaps.loc[0, "missing_start_date"] == "2020-07-01"
+    assert gaps.loc[0, "missing_end_date"] == "2020-12-31"
+    assert gaps.loc[0, "failure_class"] == "TIME_BUDGET_EXCEEDED"
+    assert status.loc[0, "last_successful_stage"] == "ISYATIRIM_RAW"
+    assert failures.empty
+
+
+def test_two_pass_collection_retries_only_incomplete_security_and_checkpoints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    preflight = pipeline.preflight()
+    calls: list[tuple[int, str]] = []
+    checkpoints: list[pd.DataFrame] = []
+
+    def fake_collect(
+        _collector: object,
+        row_number: int,
+        row: pd.Series,
+        *,
+        collection_pass: int,
+        **_: object,
+    ) -> ManifestOutcome:
+        security_id = str(row["security_id"])
+        ticker = str(row["current_ticker"])
+        calls.append((collection_pass, security_id))
+        if collection_pass == 1 and ticker == "AAA":
+            return ManifestOutcome(
+                row_number=row_number,
+                security_id=security_id,
+                current_ticker=ticker,
+                provider_ticker=ticker,
+                period_start=str(row["period_start"]),
+                period_end=str(row["period_end"]),
+                isyatirim_status="FAILED",
+                yfinance_status="FAILED",
+                nominal_status="FAILED",
+                isyatirim_raw_snapshot_id="failed-is",
+                yfinance_raw_snapshot_id="failed-yf",
+                nominal_snapshot_id="",
+                failure_stage="ISYATIRIM",
+                failure_class="TimeoutError",
+                failure_reason="provider timeout",
+                collection_pass=1,
+                retry_recommended=True,
+            )
+        result = _complete(row_number, security_id, ticker)
+        return replace(result, collection_pass=collection_pass)
+
+    monkeypatch.setattr(pipeline, "_collect_manifest_row", fake_collect)
+    monkeypatch.setattr(
+        pipeline,
+        "_write_collection_checkpoint",
+        lambda status, *_args, **_kwargs: checkpoints.append(status.copy()),
+    )
+
+    outcomes, status, summary, passes = pipeline.collect_manifest(preflight)
+
+    aaa_id = str(
+        preflight.universe.loc[
+            preflight.universe["current_ticker"].eq("AAA"), "security_id"
+        ].iloc[0]
+    )
+    bbb_id = str(
+        preflight.universe.loc[
+            preflight.universe["current_ticker"].eq("BBB"), "security_id"
+        ].iloc[0]
+    )
+    assert calls == [(1, aaa_id), (1, bbb_id), (2, aaa_id)]
+    assert len(checkpoints) == 3
+    assert status["status"].eq("COMPLETE").all()
+    assert summary["retry_pass_attempted_count"] == 1
+    assert summary["retry_pass_recovered_count"] == 1
+    assert summary["unattempted_security_count"] == 0
+    assert passes["retry_security_ids"] == [aaa_id]
+    assert len(outcomes) == 2
+
+
+def test_legacy_checkpoint_resume_starts_with_first_unattempted_security(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    preflight = pipeline.preflight()
+    first = preflight.manifest.iloc[0]
+    first_id = str(first.security_id)
+    second = preflight.manifest.iloc[1]
+    second_id = str(second.security_id)
+    partial = ManifestOutcome(
+        row_number=0,
+        security_id=first_id,
+        current_ticker=str(first.current_ticker),
+        provider_ticker=str(first.provider_ticker),
+        period_start=str(first.period_start),
+        period_end=str(first.period_end),
+        isyatirim_status="FAILED",
+        yfinance_status="FAILED",
+        nominal_status="FAILED",
+        isyatirim_raw_snapshot_id="",
+        yfinance_raw_snapshot_id="",
+        nominal_snapshot_id="",
+        failure_stage="ISYATIRIM",
+        failure_class="TIME_BUDGET_EXCEEDED",
+        failure_reason="budget exhausted",
+        collection_pass=1,
+        retry_recommended=True,
+    )
+    status = build_collection_status(preflight, [partial])
+    summary = build_collection_summary(status)
+    provenance = pipeline._run_provenance(
+        preflight,
+        status,
+        summary,
+        run_status="COLLECTING_PASS_1",
+        run_started_at_utc="2026-07-31T00:00:00Z",
+        used_security_ids=(),
+        excluded_security_ids=(),
+        snapshots=(),
+        outcomes=(partial,),
+        collection_passes={
+            "first_pass_started_at_utc": "2026-07-31T00:00:00Z",
+            "first_pass_finished_at_utc": None,
+            "retry_pass_started_at_utc": None,
+            "retry_pass_finished_at_utc": None,
+        },
+    )
+    pipeline._checkpoint_attempt_history = (partial,)
+    pipeline._write_collection_checkpoint(status, summary, provenance, (partial,))
+    (pipeline.paths.report_root / "collection_outcomes.json").unlink()
+
+    calls: list[tuple[int, str]] = []
+
+    def fake_collect(
+        _collector: object,
+        row_number: int,
+        row: pd.Series,
+        *,
+        collection_pass: int,
+        **_: object,
+    ) -> ManifestOutcome:
+        security_id = str(row["security_id"])
+        calls.append((collection_pass, security_id))
+        return replace(
+            _complete(row_number, security_id, str(row["current_ticker"])),
+            collection_pass=collection_pass,
+        )
+
+    monkeypatch.setattr(pipeline, "_collect_manifest_row", fake_collect)
+
+    outcomes, result_status, _, _ = pipeline.collect_manifest(preflight)
+
+    assert calls == [(1, second_id), (2, first_id)]
+    assert len(outcomes) == 2
+    assert result_status["status"].eq("COMPLETE").all()
+    payload = json.loads(
+        (pipeline.paths.report_root / "collection_outcomes.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert payload["schema_version"] == "full_history_manifest_outcomes_v1"
+    assert len(payload["latest_outcomes"]) == 2
+    assert len(payload["attempt_history"]) == 3
+
+
+def test_resumed_retry_checkpoint_does_not_start_a_third_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    preflight = pipeline.preflight()
+    calls: list[tuple[int, str]] = []
+
+    def partial_collect(
+        _collector: object,
+        row_number: int,
+        row: pd.Series,
+        *,
+        collection_pass: int,
+        **_: object,
+    ) -> ManifestOutcome:
+        security_id = str(row["security_id"])
+        calls.append((collection_pass, security_id))
+        return ManifestOutcome(
+            row_number=row_number,
+            security_id=security_id,
+            current_ticker=str(row["current_ticker"]),
+            provider_ticker=str(row["provider_ticker"]),
+            period_start=str(row["period_start"]),
+            period_end=str(row["period_end"]),
+            isyatirim_status="FAILED",
+            yfinance_status="FAILED",
+            nominal_status="FAILED",
+            isyatirim_raw_snapshot_id="",
+            yfinance_raw_snapshot_id="",
+            nominal_snapshot_id="",
+            failure_stage="ISYATIRIM",
+            failure_class="TIME_BUDGET_EXCEEDED",
+            failure_reason="budget exhausted",
+            collection_pass=collection_pass,
+            retry_recommended=True,
+        )
+
+    monkeypatch.setattr(pipeline, "_collect_manifest_row", partial_collect)
+    pipeline.collect_manifest(preflight)
+    assert len(calls) == 4
+
+    monkeypatch.setattr(
+        pipeline,
+        "_collect_manifest_row",
+        lambda *_args, **_kwargs: pytest.fail("third provider attempt was started"),
+    )
+    outcomes, status, _, _ = pipeline.collect_manifest(preflight)
+
+    assert len(outcomes) == 2
+    assert status["status"].eq("FAILED").all()
+    assert status["last_collection_pass"].astype(int).eq(2).all()
+
+
+def test_run_starts_derived_only_after_both_collection_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    preflight = pipeline.preflight()
+    outcomes = tuple(
+        _complete(index, str(row.security_id), str(row.current_ticker))
+        for index, row in preflight.manifest.iterrows()
+    )
+    status = build_collection_status(preflight, outcomes)
+    summary = build_collection_summary(status)
+    passes_finished = False
+    derived_called = False
+
+    def fake_collect(*_: object, **__: object):
+        nonlocal passes_finished
+        passes_finished = True
+        return outcomes, status, summary, {
+            "first_pass_finished_at_utc": "2026-07-29T01:00:00Z",
+            "retry_pass_finished_at_utc": "2026-07-29T02:00:00Z",
+        }
+
+    def fake_derived(*_: object, **__: object):
+        nonlocal derived_called
+        assert passes_finished
+        derived_called = True
+        raise RuntimeError("stop after gating assertion")
+
+    monkeypatch.setattr(pipeline, "preflight", lambda: preflight)
+    monkeypatch.setattr(pipeline, "collect_manifest", fake_collect)
+    monkeypatch.setattr(pipeline, "run_derived", fake_derived)
+
+    result = pipeline.run()
+
+    assert derived_called
+    assert result.derived is None
+    assert not result.preflight.universe.empty
+
+
+def test_retry_remaining_security_is_excluded_from_derived_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    preflight = pipeline.preflight()
+    first = preflight.manifest.iloc[0]
+    second = preflight.manifest.iloc[1]
+    complete = _complete(0, str(first.security_id), str(first.current_ticker))
+    failed = ManifestOutcome(
+        row_number=1,
+        security_id=str(second.security_id),
+        current_ticker=str(second.current_ticker),
+        provider_ticker=str(second.provider_ticker),
+        period_start=str(second.period_start),
+        period_end=str(second.period_end),
+        isyatirim_status="FAILED",
+        yfinance_status="FAILED",
+        nominal_status="FAILED",
+        isyatirim_raw_snapshot_id="failed-is",
+        yfinance_raw_snapshot_id="failed-yf",
+        nominal_snapshot_id="",
+        failure_stage="ISYATIRIM",
+        failure_class="TIME_BUDGET_EXCEEDED",
+        failure_reason="retry budget exhausted",
+        collection_pass=2,
+        retry_recommended=True,
+    )
+    outcomes = (complete, failed)
+    status = build_collection_status(preflight, outcomes)
+    summary = build_collection_summary(status)
+    captured_used: tuple[str, ...] = ()
+
+    def fake_derived(
+        _preflight: object,
+        _outcomes: object,
+        used_security_ids: tuple[str, ...],
+        **_: object,
+    ) -> object:
+        nonlocal captured_used
+        captured_used = used_security_ids
+        raise RuntimeError("stop after scope assertion")
+
+    monkeypatch.setattr(pipeline, "preflight", lambda: preflight)
+    monkeypatch.setattr(
+        pipeline,
+        "collect_manifest",
+        lambda *_args, **_kwargs: (outcomes, status, summary, {}),
+    )
+    monkeypatch.setattr(pipeline, "run_derived", fake_derived)
+
+    result = pipeline.run()
+
+    assert captured_used == (str(first.security_id),)
+    assert result.used_security_ids == (str(first.security_id),)
+    assert result.excluded_security_ids == (str(second.security_id),)
