@@ -1,6 +1,6 @@
 # PROJECT STATUS
 
-**Son güncelleme:** 2026-07-29
+**Son güncelleme:** 2026-08-03
 
 ## Mevcut Aşama
 
@@ -183,6 +183,18 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Production koşusu commit `5df025d` üzerinde `2020-03-13–2026-07-29` dönemi ve 621-security manifestiyle başlatıldı. İlk satır SNGYO iki raw + nominal snapshot ile `COMPLETE` oldu; ikinci satır ALKLC eski dönem adaptive timeout/chunk zincirinde 15 dakikayı aşınca talimattaki uzun-koşu fallback'i uygulanarak süreç durduruldu. Atomik checkpoint `1 attempted / 1 complete / 620 unattempted` durumunda korunmaktadır; derived zincir ve fold feasibility production verisinde henüz başlamadı.
 - SNGYO snapshot'ları: İş Yatırım raw `snap_3cf2e12ae7a8fa5a_r0001_3fcc1965ee24`, yFinance raw `snap_92ed2a2eb1936b23_r0001_ad225f186cc3`, nominal `snap_bf4397cacad8f98c_r0001_29f4f0443d02`. Raw/cache dosyaları Git'e eklenmemiştir.
 
+## İki Turlu Bütçeli Collection Dayanıklılığı — 2026-07-31
+
+- D035 ile collection bütün 621 securities için sıralı birinci tur ve yalnız retry-edilebilir eksikler için tek ikinci tur olarak uygulanmıştır. Varsayılan İş Yatırım security bütçeleri sırasıyla `1200` ve `1800` saniyedir; CLI argümanlarıyla değiştirilebilir.
+- Bütçe `time.monotonic()` ile bütün 12/6/3 aylık recursive chunk ve retry zincirini kapsar. Bütçe dolduğunda yeni request/retry başlamaz, açık `TIME_BUDGET_EXCEEDED` kaydı oluşur; başarılı chunk cache'leri korunur ve yFinance bağımsız olarak çalışmaya devam eder.
+- Her security sonrası status/summary/provenance checkpoint'i atomik yenilenir. `collection_gaps.csv` gerçek eksik provider/tarih aralıklarını, `collection_failures.csv` tamamen başarısız securities'i, `ticker_mapping_review.csv` ise otomatik alias üretmeden açıklanamayan seri boşluklarını ayırır.
+- Provider başarı oranlarının denominator'ı yalnız attempted securities'dir; `PENDING/UNATTEMPTED` dahil edilmez. Ayrı yFinance raw ve nominal başarı oranları ile first/retry pass sayaçları raporlanır.
+- Derived zincir iki tur bitmeden başlayamaz; yalnız fiziksel doğrulamadan geçen `COMPLETE` securities kullanılır ve partial kapsam `experiment_ready=false` kalır. Fold feasibility LightGBM import etmez veya eğitmez.
+- SNGYO'nun üç mevcut snapshot'ı yerelde fiziksel olarak doğrulanmış, `COMPLETE` ve kullanılabilir bulunmuştur; resume sırasında provider fetch'i gerektirmez.
+- Yeni bütçe/retry/gap/gating ve cross-process resume testleriyle tam regresyon `332 passed`; `compileall`, `pip check` ve `git diff --check` başarılı tamamlanmıştır. Bütçe kesintisi, aktif hata aralığına ek olarak henüz hiç denenmemiş sonraki provider aralıklarını da eksiksiz gap satırlarıyla kaydeder.
+- PR #5 `632a1f047fa5c75186c824a757f88e2ac3ca2d21` merge commit'iyle `main` branch'ine alınmıştır. Son tutarlı production checkpoint'i `35 attempted / 17 complete / 14 partial / 0 failed / 4 no-history / 586 unattempted` durumundadır; son denenen security NTHOL, sıradaki MOPAS'tır. Derived zincir başlamamış ve `experiment_ready=false` kalmıştır.
+- Process yeniden başlatıldığında daha önce first-pass sonucu checkpoint edilmiş PARTIAL/NO_HISTORY satırların yeniden first-pass provider çağrısı alması gerçek resume açığı olarak doğrulanmıştır. Satır düzeyi latest outcome ve attempt history `collection_outcomes.json` içinde atomik saklanacak şekilde düzeltme uygulanmıştır; eski tutarlı status/summary/provenance/gap raporları güvenli biçimde migrate edilir ve ilk UNATTEMPTED satırdan devam edilir. Production doğrulamasında eski 33 security provider çağrısı yapılmadan checkpoint hit ile atlanmış, koşu EYGYO'dan başlamış ve EYGYO ile NTHOL sonuçları atomik kaydedilmiştir.
+
 ## Kesinleşen Başlangıç Senaryosu
 
 - Tahmin zamanı: `T` günü piyasa kapandıktan sonra
@@ -229,10 +241,12 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Görevler
 
-1. `python -u scripts/run_full_history_pipeline.py` komutunu yeniden çalıştırarak doğrulanmış SNGYO snapshot'larını fetch etmeden kullan ve ALKLC satırından itibaren 621-security collection checkpoint'ini tamamla.
-2. Tam collection sonrası orchestration'ın identity, clean, label, XU100, `baseline_v1`, prediction universe, veri kalitesi, sınıf dağılımı ve fold feasibility aşamalarını tamamlamasını doğrula.
-3. İlk gerçek 20 oturumluk test başlangıç tarihini ayrı kararla kesinleştir.
-4. İlk gerçek walk-forward deneyinden hemen önce `EXPERIMENT_LOG.md` oluştur ve ardından deneyi çalıştır.
+1. `python -u scripts/run_full_history_pipeline.py` komutuyla production collection'ı 35/621 checkpoint'inden ve MOPAS satırından sürdür.
+2. 621 security'nin tamamını iki turlu D035 akışıyla dene; doğrulanmış SNGYO ve diğer COMPLETE snapshot/cache kapsamını yeniden fetch etme.
+3. Collection tamamlandıktan sonra identity, clean, label, XU100, exact 32 `baseline_v1`, prediction universe ve veri-kalitesi raporlarını üret.
+4. Fold feasibility sonuçlarını LightGBM eğitmeden incele.
+5. İlk gerçek 20 oturumluk test başlangıç tarihini ayrı kararla kesinleştir.
+6. Bundan sonra `EXPERIMENT_LOG.md` oluşturup ilk gerçek LightGBM walk-forward deneyini çalıştır.
 
 ## Tamamlanan Ana Aşamalar
 

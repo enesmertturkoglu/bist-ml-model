@@ -127,9 +127,11 @@ D033 immutable model artifact registry tamamlanmıştır.
 
 D034 exact `2026-07-29` aktif BİST master evreni 621 security ile dondurulmuştur.
 
-Son doğrulanmış regresyon sonucu `306 passed` olmuştur. İlk gerçek LightGBM performans deneyi henüz yapılmamıştır.
+PR #5 sonrasında resumable full-history orchestration ve fold feasibility altyapısı tamamlanmıştır. D035 iki turlu, security-geneli bütçeli collection; atomik security checkpoint'leri ve satır düzeyi cross-process resume kaydıyla uygulanmıştır.
 
-Sıradaki teknik aşama `2020-03-13` sonrası tam raw, identity, clean, label, XU100 ve `baseline_v1` feature snapshot zinciridir.
+Son doğrulanmış regresyon sonucu `332 passed` olmuştur. İlk gerçek LightGBM performans deneyi henüz yapılmamıştır ve `EXPERIMENT_LOG.md` oluşturulmamıştır.
+
+Son tutarlı production checkpoint'i `35 attempted / 17 complete / 14 partial / 4 no-history / 586 unattempted` durumundadır. Derived zincir başlamamış ve `experiment_ready=false` kalmıştır. Sıradaki teknik görev `MOPAS` satırından collection koşusunu sürdürmek, 621 security'nin tamamını denemek ve ardından derived kalite/fold feasibility zincirini üretmektir.
 
 Açık kararlar:
 

@@ -1,13 +1,22 @@
 {
+  "attempted_security_count": 35,
   "clean_success_rate": 0.0,
-  "collection_attempted_count": 1,
-  "complete_security_count": 1,
+  "collection_attempted_count": 35,
+  "complete_security_count": 17,
   "failed_security_count": 0,
+  "first_pass_complete_count": 17,
   "identity_success_rate": 0.0,
-  "isyatirim_success_rate": 1.0,
+  "isyatirim_success_rate": 0.4857142857142857,
   "label_success_rate": 0.0,
   "master_security_count": 621,
-  "no_history_security_count": 0,
-  "partial_security_count": 0,
-  "yfinance_success_rate": 1.0
+  "no_history_security_count": 4,
+  "nominal_success_rate": 0.8857142857142857,
+  "partial_security_count": 14,
+  "provider_success_rate_denominator": "attempted_security_count; PENDING/UNATTEMPTED excluded",
+  "retry_pass_attempted_count": 0,
+  "retry_pass_recovered_count": 0,
+  "retry_pass_remaining_failed_count": 0,
+  "retry_pass_remaining_partial_count": 0,
+  "unattempted_security_count": 586,
+  "yfinance_success_rate": 0.8857142857142857
 }

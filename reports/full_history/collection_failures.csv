@@ -1,0 +1,5 @@
+security_id,current_ticker,status,failure_stage,failure_class,failure_reason,last_successful_stage,retry_recommended,collection_pass
+SEC_0ddc94542368,SKYLP,NO_HISTORY,YFINANCE,RuntimeError,yFinance failed for SKYLP after 5 attempts: yFinance returned no rows for SKYLP,,False,1
+SEC_0f2baa712775,MHRGY,NO_HISTORY,YFINANCE,RuntimeError,yFinance failed for MHRGY after 5 attempts: yFinance returned no rows for MHRGY,,False,1
+SEC_0f390e9a4deb,MIATK,NO_HISTORY,YFINANCE,RuntimeError,yFinance failed for MIATK after 5 attempts: yFinance returned no rows for MIATK,,False,1
+SEC_0f4bd7b320a7,AZTEK,NO_HISTORY,YFINANCE,RuntimeError,yFinance failed for AZTEK after 5 attempts: yFinance returned no rows for AZTEK,,False,1
