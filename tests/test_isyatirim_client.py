@@ -93,6 +93,24 @@ class AdvancingQueueSession(QueueSession):
         return super().get(url, **kwargs)
 
 
+class VariableAdvancingQueueSession(QueueSession):
+    def __init__(
+        self,
+        outcomes: Iterable[object],
+        clock: FakeClock,
+        advance_seconds: Iterable[float],
+    ) -> None:
+        super().__init__(outcomes)
+        self.clock = clock
+        self.advance_seconds = list(advance_seconds)
+
+    def get(self, url: str, **kwargs: Any) -> FakeResponse:
+        if not self.advance_seconds:
+            raise AssertionError("Unexpected request timing")
+        self.clock.advance(self.advance_seconds.pop(0))
+        return super().get(url, **kwargs)
+
+
 def _row(day: str, *, close: float = 10.0) -> dict[str, object]:
     return {
         "HGDG_HS_KODU": "THYAO",
@@ -735,6 +753,40 @@ def test_budget_expiry_prevents_a_new_retry(tmp_path: Path) -> None:
     assert len(session.calls) == 1
     assert client.stats.retry_count == 0
     assert captured.value.failures[0].error_type == TIME_BUDGET_EXCEEDED
+
+
+def test_empty_response_time_does_not_consume_security_budget(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock()
+    session = VariableAdvancingQueueSession(
+        [FakeResponse({"value": []}), _response("30-06-2024")],
+        clock,
+        advance_seconds=[2.0, 0.2],
+    )
+    client = IsYatirimClient(
+        session=session,
+        cache_dir=tmp_path,
+        max_retries=1,
+        request_delay_seconds=0,
+        sleep_func=clock.sleep,
+        random_func=lambda: 0.0,
+        monotonic_func=clock.monotonic,
+        ssl_verify=True,
+    )
+
+    result = client.fetch_history(
+        "THYAO",
+        "2023-01-01",
+        "2024-12-31",
+        security_budget_seconds=1,
+        security_started_at=0,
+    )
+
+    assert len(result) == 1
+    assert len(session.calls) == 2
+    assert client.stats.no_data_range_count == 1
+    assert client.stats.time_budget_exceeded_count == 0
 
 
 def test_budget_failure_reports_later_unattempted_ranges(tmp_path: Path) -> None:

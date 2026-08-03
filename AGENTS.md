@@ -129,7 +129,7 @@ D034 exact `2026-07-29` aktif BİST master evreni 621 security ile dondurulmuşt
 
 PR #5 sonrasında resumable full-history orchestration ve fold feasibility altyapısı tamamlanmıştır. D035 iki turlu, security-geneli bütçeli collection; atomik security checkpoint'leri ve satır düzeyi cross-process resume kaydıyla uygulanmıştır. D036 geçerli boş İş Yatırım aralığını `NO_DATA_IN_RANGE` ve checksum'lı coverage cache olarak sınıflandırır; varsayılan üç security worker, process-geneli İş Yatırım concurrency `2`, tek-yazarlı coordinator ve manifest-sıralı deterministik commit kullanır.
 
-Son doğrulanmış regresyon sonucu `352 passed` olmuştur. İlk gerçek LightGBM performans deneyi henüz yapılmamıştır ve `EXPERIMENT_LOG.md` oluşturulmamıştır.
+Son doğrulanmış regresyon sonucu `353 passed` olmuştur. İlk gerçek LightGBM performans deneyi henüz yapılmamıştır ve `EXPERIMENT_LOG.md` oluşturulmamıştır.
 
 Son tutarlı production checkpoint'i `43 attempted / 22 complete / 17 partial / 4 no-history / 578 unattempted` durumundadır. Derived zincir başlamamış ve `experiment_ready=false` kalmıştır. Sıradaki teknik görev `EKSUN` satırından collection koşusunu sürdürmek, 621 security'nin tamamını denemek ve ardından derived kalite/fold feasibility zincirini üretmektir.
 

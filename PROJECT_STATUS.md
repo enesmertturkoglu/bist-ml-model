@@ -203,7 +203,7 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Varsayılan `security_worker_count=3`, process-geneli `isyatirim_max_concurrency=2` ve `global_request_interval_seconds=1.0` oldu. Worker fetch/parse/DataFrame/telemetri hazırlar; tek coordinator snapshot manifest/revision ile bütün full-history checkpoint raporlarını manifest/security sırasıyla yazar.
 - Mevcut production checkpoint yeni kodla `43` row outcome, `22` fiziksel checksum-doğrulanmış COMPLETE, first pass bitmemiş ve retry pass başlamamış olarak yeniden doğrulandı. İlk yeni security hâlâ EKSUN'dur; production raporları benchmark sırasında değiştirilmedi.
 - Gerçek izole benchmark AEFES, MOPAS ve IZENR üzerinde workers `1/2/3` ile tamamlandı. Üç koşuda status, gap sınıfı ve İş Yatırım/yFinance/nominal checksum'ları aynı kaldı. Toplam süreler sırasıyla `96.768 / 131.234 / 54.227` saniye; gözlenen global İş Yatırım concurrency `1 / 2 / 2` oldu. MOPAS workers=1 sonucu `8` toplam network request, `0` retry, `4` empty range ve `12.866` saniyedir; eski production sonucu `134 request / 106 retry / 1204.540 saniye` idi. Gerçek resume `0` network, `7` cache hit ve `4` empty-range cache hit verdi.
-- Tam regresyon `352 passed` tamamlandı; `compileall`, `pip check` ve `git diff --check` başarılıdır. Gerçek LightGBM çağrılmadı, 32 feature/model/walk-forward kararları değişmedi ve `EXPERIMENT_LOG.md` oluşturulmadı.
+- Tam regresyon `353 passed` tamamlandı; `compileall`, `pip check` ve `git diff --check` başarılıdır. Gerçek LightGBM çağrılmadı, 32 feature/model/walk-forward kararları değişmedi ve `EXPERIMENT_LOG.md` oluşturulmadı.
 
 ## Kesinleşen Başlangıç Senaryosu
 

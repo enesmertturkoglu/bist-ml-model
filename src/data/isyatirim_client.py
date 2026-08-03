@@ -165,15 +165,19 @@ class _AttemptFailure(Exception):
     allow_adaptive_split: bool
 
 
-@dataclass(frozen=True)
+@dataclass
 class _SecurityBudget:
     started_at: float
     seconds: float
     monotonic_func: Callable[[], float]
+    excluded_seconds: float = 0.0
 
     @property
     def elapsed_seconds(self) -> float:
-        return max(0.0, float(self.monotonic_func()) - self.started_at)
+        return max(
+            0.0,
+            float(self.monotonic_func()) - self.started_at - self.excluded_seconds,
+        )
 
     @property
     def remaining_seconds(self) -> float:
@@ -182,6 +186,11 @@ class _SecurityBudget:
     @property
     def exhausted(self) -> bool:
         return self.elapsed_seconds >= self.seconds
+
+    def exclude(self, seconds: float) -> None:
+        """Exclude successful empty-response time from the security budget."""
+
+        self.excluded_seconds += max(0.0, float(seconds))
 
 
 @dataclass(frozen=True)
@@ -683,6 +692,7 @@ class IsYatirimClient:
         saw_connection_error = False
         for attempt in range(1, self.max_retries + 1):
             self._ensure_budget_available(ticker, start, end, chunk_months)
+            attempt_started_at = float(self.monotonic_func())
             retry_after_seconds: float | None = None
             if attempt > 1:
                 self.stats.retry_count += 1
@@ -727,6 +737,10 @@ class IsYatirimClient:
                     raise TransientProviderError(str(error)) from error
                 response.raise_for_status()
                 frame = self._parse_response(response, ticker, start, end)
+                if frame.empty and self._active_budget is not None:
+                    self._active_budget.exclude(
+                        float(self.monotonic_func()) - attempt_started_at
+                    )
                 return frame, saw_timeout
             except requests.Timeout as error:
                 self.stats.timeout_count += 1
