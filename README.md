@@ -8,7 +8,7 @@ BİST hisselerini, T+1 açılışından sonraki üç BİST işlem günü içinde
 
 Veri toplama ve değişmez snapshot, temizleme ve uygunluk, üç işlem günlük label, security identity/tarih-etkin ticker mapping, doğrulanmış XU100, global BİST takvimi, tam 32 `baseline_v1` feature pipeline'ı ve leakage-safe LightGBM expanding walk-forward eğitim/artifact altyapısı tamamlandı. Resmî kaynaklı `bist_active_universe_v1`, `2026-07-29` as-of tarihinde 621 security ile donduruldu. İlk gerçek model deneyi henüz çalıştırılmadı.
 
-`scripts/run_full_history_pipeline.py` iki turlu, security-geneli süre bütçeli ve atomik checkpoint'li resumable orchestration olarak hazırdır. Son tutarlı production checkpoint'i 35/621 security'nin denendiğini gösterir: 17 COMPLETE, 14 PARTIAL, 4 NO_HISTORY ve 586 UNATTEMPTED. Sıradaki security MOPAS'tır. Koşuyu checksum doğrulamalı snapshot/cache reuse ile sürdürmek için:
+`scripts/run_full_history_pipeline.py` iki turlu, security-geneli süre bütçeli ve atomik checkpoint'li resumable orchestration olarak hazırdır. Son tutarlı production checkpoint'i 43/621 security'nin denendiğini gösterir: 22 COMPLETE, 17 PARTIAL, 4 NO_HISTORY ve 578 UNATTEMPTED. Sıradaki security EKSUN'dur. Koşuyu checksum doğrulamalı snapshot/cache reuse ile sürdürmek için:
 
 ```powershell
 python -u scripts/run_full_history_pipeline.py
@@ -60,6 +60,6 @@ python scripts/build_history_collection_manifest.py --active-universe-snapshot-i
 
 ## Sıradaki aşama
 
-- Production collection'ı 35/621 checkpoint'inden sürdürüp bütün security'leri denemek
+- Production collection'ı 43/621 checkpoint'inden sürdürüp bütün security'leri denemek
 - `2020-03-13` sonrası tam derived snapshot ve veri-kalitesi zincirini üretmek
 - Sınıf dağılımı/fold feasibility raporundan sonra ilk gerçek test tarihini ayrı kararla kesinleştirmek

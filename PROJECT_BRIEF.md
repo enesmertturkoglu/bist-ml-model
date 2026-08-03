@@ -108,7 +108,7 @@ Veri toplama ve değişmez snapshot altyapısı, temizleme, label üretimi, secu
 
 Gerçek kabul paneli 20 security × 39 seans = 780 satırla `PASS` tamamlanmıştır. Duplicate `security_id + prediction_date` ve sonsuz değer sayısı `0`, son seansta feature geçerliliği `%100` olmuştur.
 
-Resmî kaynaklı `bist_active_universe_v1`, exact `2026-07-29` as-of tarihinde 621 security ile dondurulmuştur. PR #5 sonrasında resumable full-history orchestration ve LightGBM çağırmayan fold feasibility altyapısı tamamlanmıştır. İki turlu production collection'ın son tutarlı checkpoint'i 35/621 security denenmiş, 17 COMPLETE, 14 PARTIAL, 4 NO_HISTORY ve 586 UNATTEMPTED durumundadır; sıradaki security MOPAS'tır. Sıradaki iş collection'ı checkpoint'ten tamamlamak ve ardından `2020-03-13` sonrası raw, identity, clean, label, XU100 ve feature snapshot zincirini üretmektir. İlk gerçek test tarihi fold feasibility raporundan sonra ayrı kararla kesinleştirilecektir.
+Resmî kaynaklı `bist_active_universe_v1`, exact `2026-07-29` as-of tarihinde 621 security ile dondurulmuştur. PR #5 sonrasında resumable full-history orchestration ve LightGBM çağırmayan fold feasibility altyapısı tamamlanmıştır. İki turlu production collection'ın son tutarlı checkpoint'i 43/621 security denenmiş, 22 COMPLETE, 17 PARTIAL, 4 NO_HISTORY ve 578 UNATTEMPTED durumundadır; sıradaki security EKSUN'dur. Sıradaki iş collection'ı checkpoint'ten tamamlamak ve ardından `2020-03-13` sonrası raw, identity, clean, label, XU100 ve feature snapshot zincirini üretmektir. İlk gerçek test tarihi fold feasibility raporundan sonra ayrı kararla kesinleştirilecektir.
 
 ## Sohbetler Arası Devir Standardı
 

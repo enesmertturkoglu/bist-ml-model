@@ -192,8 +192,9 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Derived zincir iki tur bitmeden başlayamaz; yalnız fiziksel doğrulamadan geçen `COMPLETE` securities kullanılır ve partial kapsam `experiment_ready=false` kalır. Fold feasibility LightGBM import etmez veya eğitmez.
 - SNGYO'nun üç mevcut snapshot'ı yerelde fiziksel olarak doğrulanmış, `COMPLETE` ve kullanılabilir bulunmuştur; resume sırasında provider fetch'i gerektirmez.
 - Yeni bütçe/retry/gap/gating ve cross-process resume testleriyle tam regresyon `332 passed`; `compileall`, `pip check` ve `git diff --check` başarılı tamamlanmıştır. Bütçe kesintisi, aktif hata aralığına ek olarak henüz hiç denenmemiş sonraki provider aralıklarını da eksiksiz gap satırlarıyla kaydeder.
-- PR #5 `632a1f047fa5c75186c824a757f88e2ac3ca2d21` merge commit'iyle `main` branch'ine alınmıştır. Son tutarlı production checkpoint'i `35 attempted / 17 complete / 14 partial / 0 failed / 4 no-history / 586 unattempted` durumundadır; son denenen security NTHOL, sıradaki MOPAS'tır. Derived zincir başlamamış ve `experiment_ready=false` kalmıştır.
+- PR #5 `632a1f047fa5c75186c824a757f88e2ac3ca2d21` merge commit'iyle `main` branch'ine alınmıştır.
 - Process yeniden başlatıldığında daha önce first-pass sonucu checkpoint edilmiş PARTIAL/NO_HISTORY satırların yeniden first-pass provider çağrısı alması gerçek resume açığı olarak doğrulanmıştır. Satır düzeyi latest outcome ve attempt history `collection_outcomes.json` içinde atomik saklanacak şekilde düzeltme uygulanmıştır; eski tutarlı status/summary/provenance/gap raporları güvenli biçimde migrate edilir ve ilk UNATTEMPTED satırdan devam edilir. Production doğrulamasında eski 33 security provider çağrısı yapılmadan checkpoint hit ile atlanmış, koşu EYGYO'dan başlamış ve EYGYO ile NTHOL sonuçları atomik kaydedilmiştir.
+- Production collection checkpoint'i MOPAS–ATSYH aralığındaki sekiz security'nin first-pass sonuçlarıyla ilerlemiştir. Son tutarlı durum `43 attempted / 22 complete / 17 partial / 0 failed / 4 no-history / 578 unattempted`; son denenen security ATSYH, sıradaki EKSUN'dur. Raporlar 621 tekil security ile tutarlıdır; derived zincir başlamamış ve `experiment_ready=false` kalmıştır.
 
 ## Kesinleşen Başlangıç Senaryosu
 
@@ -241,7 +242,7 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Görevler
 
-1. `python -u scripts/run_full_history_pipeline.py` komutuyla production collection'ı 35/621 checkpoint'inden ve MOPAS satırından sürdür.
+1. `python -u scripts/run_full_history_pipeline.py` komutuyla production collection'ı 43/621 checkpoint'inden ve EKSUN satırından sürdür.
 2. 621 security'nin tamamını iki turlu D035 akışıyla dene; doğrulanmış SNGYO ve diğer COMPLETE snapshot/cache kapsamını yeniden fetch etme.
 3. Collection tamamlandıktan sonra identity, clean, label, XU100, exact 32 `baseline_v1`, prediction universe ve veri-kalitesi raporlarını üret.
 4. Fold feasibility sonuçlarını LightGBM eğitmeden incele.

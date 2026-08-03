@@ -131,7 +131,7 @@ PR #5 sonrasında resumable full-history orchestration ve fold feasibility altya
 
 Son doğrulanmış regresyon sonucu `332 passed` olmuştur. İlk gerçek LightGBM performans deneyi henüz yapılmamıştır ve `EXPERIMENT_LOG.md` oluşturulmamıştır.
 
-Son tutarlı production checkpoint'i `35 attempted / 17 complete / 14 partial / 4 no-history / 586 unattempted` durumundadır. Derived zincir başlamamış ve `experiment_ready=false` kalmıştır. Sıradaki teknik görev `MOPAS` satırından collection koşusunu sürdürmek, 621 security'nin tamamını denemek ve ardından derived kalite/fold feasibility zincirini üretmektir.
+Son tutarlı production checkpoint'i `43 attempted / 22 complete / 17 partial / 4 no-history / 578 unattempted` durumundadır. Derived zincir başlamamış ve `experiment_ready=false` kalmıştır. Sıradaki teknik görev `EKSUN` satırından collection koşusunu sürdürmek, 621 security'nin tamamını denemek ve ardından derived kalite/fold feasibility zincirini üretmektir.
 
 Açık kararlar:
 

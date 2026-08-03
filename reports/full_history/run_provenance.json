@@ -1154,30 +1154,302 @@
         "source": "isyatirim",
         "used_security_count": 0
       }
+    ],
+    "SEC_1073193e5afd": [
+      {
+        "content_checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 0,
+        "snapshot_id": "snap_17187e041fc378db_r0001_a9b59d42b68c",
+        "snapshot_status": "FAILED",
+        "source": "isyatirim",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "1a293b3e563f32dbd73853a7f0964b6ab202b6101c544d72c371a6a3926b14ab",
+        "input_snapshot_ids": [
+          "snap_df2cc576795969fb_r0001_8a565458fab4"
+        ],
+        "layer": "derived",
+        "row_count": 368,
+        "snapshot_id": "snap_bb009847368c8452_r0001_9d13f73b3276",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "346b7d68b9525dec8150cdc9a5614b316f11d059a31428c5b6db296e8e04abaf",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 368,
+        "snapshot_id": "snap_df2cc576795969fb_r0001_8a565458fab4",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      }
+    ],
+    "SEC_12b14ce2953d": [
+      {
+        "content_checksum": "0d9d51b8015b6599007859ad4afeaaa63779068eea2b27b448a88c20d49332dc",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 1592,
+        "snapshot_id": "snap_c9b9597a555ed801_r0001_564149443aeb",
+        "snapshot_status": "COMPLETE",
+        "source": "isyatirim",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "8be558af07e80d17505fc3150c5e9af73a2da2cdd2f31322665b780332ab43ae",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 1595,
+        "snapshot_id": "snap_dddff6f80f96aca5_r0001_f5c9229ac33d",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "2c6d4f817c7cb5d521fb896fc8c0223f40391e4aee01a681f4def29ed97c281a",
+        "input_snapshot_ids": [
+          "snap_dddff6f80f96aca5_r0001_f5c9229ac33d"
+        ],
+        "layer": "derived",
+        "row_count": 1595,
+        "snapshot_id": "snap_ecedfb1601a350d1_r0001_2dc2ce13e900",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      }
+    ],
+    "SEC_12b6aed35853": [
+      {
+        "content_checksum": "2914921962aaec6e8031613c2601f4e293ac2c23848a0aca4f1c4c522013a8d2",
+        "input_snapshot_ids": [
+          "snap_705d34e98c16d622_r0001_14ec4df6dad3"
+        ],
+        "layer": "derived",
+        "row_count": 1595,
+        "snapshot_id": "snap_42e20d91a009f9bf_r0001_833d8a7c3794",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "d790b0c9840c1f1d47e1f771e0a9de24e9887f8a5eed02e0c9fdf7a00c2ec828",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 1595,
+        "snapshot_id": "snap_705d34e98c16d622_r0001_14ec4df6dad3",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "b7f19b072fcc00804de806396d6eea1dd6e82ff585c72e81fc8de00773a96baf",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 1592,
+        "snapshot_id": "snap_b924f1af6f5d43c8_r0001_5e5a319eaea5",
+        "snapshot_status": "COMPLETE",
+        "source": "isyatirim",
+        "used_security_count": 0
+      }
+    ],
+    "SEC_12d182ed0464": [
+      {
+        "content_checksum": "7c15c2da634c7350adf6fb72b5881ae1fceae7bcdd205e22e3b7d21b9190acd1",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 1596,
+        "snapshot_id": "snap_2717eecf15124bf6_r0001_e124fe829efb",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "5e3faa0d7371ad6338bd7d16f8458305c091dcc304b459bdd25c949518ff22c9",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 1592,
+        "snapshot_id": "snap_dee70b98b61ea537_r0001_927be4114b1e",
+        "snapshot_status": "COMPLETE",
+        "source": "isyatirim",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "5c34c4dfa886bba588452b3e9a326553fcd18e2ec4b598cecf5e1a9f7f9f7540",
+        "input_snapshot_ids": [
+          "snap_2717eecf15124bf6_r0001_e124fe829efb"
+        ],
+        "layer": "derived",
+        "row_count": 1596,
+        "snapshot_id": "snap_ffd1d953f9be7073_r0001_e59a7cd59b0c",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      }
+    ],
+    "SEC_13296ba3d2d5": [
+      {
+        "content_checksum": "204be3098729399c7e8bc1c9f1691948b2c22530496f81fa0b847f6705d432eb",
+        "input_snapshot_ids": [
+          "snap_72543e392cf64b97_r0001_dfab90805551"
+        ],
+        "layer": "derived",
+        "row_count": 1595,
+        "snapshot_id": "snap_116cd9f4b1250b1d_r0001_7c094d30e051",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "3fee5b3438335075efe14e10017c7460a48176a621049d20e4c2e0dea2ddfa35",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 1592,
+        "snapshot_id": "snap_550fdeeb13dbe010_r0001_ebbf220c58a7",
+        "snapshot_status": "COMPLETE",
+        "source": "isyatirim",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "0fca5208a107a622d8e1c70da49bdc8e42d1e2757fa89d698a938b2074383f33",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 1595,
+        "snapshot_id": "snap_72543e392cf64b97_r0001_dfab90805551",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      }
+    ],
+    "SEC_13608480fa8d": [
+      {
+        "content_checksum": "ea0131548eb2b9c167aa874175a9238f642aee883729ea7533a8897f1574a2ec",
+        "input_snapshot_ids": [
+          "snap_fd64b4e2bffcbedf_r0001_4fe8d199ec8a"
+        ],
+        "layer": "derived",
+        "row_count": 588,
+        "snapshot_id": "snap_03843b7aa777b68f_r0001_44efaea6d37f",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "9609d8411219acc3ff991a1ca3a6aa9c3a2b9d92123a740a89374e85e20b063c",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 783,
+        "snapshot_id": "snap_c61b12bd31fd0001_r0001_1a3de6a9f602",
+        "snapshot_status": "PARTIAL",
+        "source": "isyatirim",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "c9bb7d599f1bac7e2341d595f6f0361dff0fcb1764f2f46cad54294bfc52efcb",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 588,
+        "snapshot_id": "snap_fd64b4e2bffcbedf_r0001_4fe8d199ec8a",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      }
+    ],
+    "SEC_13959c05932c": [
+      {
+        "content_checksum": "72c4c761ffdbde0e5a140b0738de6f34daafd152507af70bc68b04cda78de234",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 116,
+        "snapshot_id": "snap_017f9fcb563df674_r0001_6fbebb18e265",
+        "snapshot_status": "PARTIAL",
+        "source": "isyatirim",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "acc4a07149f4ec4f7f53176d0424f07b3cfa92fdc373e9b036af987d458dfc9b",
+        "input_snapshot_ids": [
+          "snap_9d97b3fce0a831e7_r0001_1be821b73227"
+        ],
+        "layer": "derived",
+        "row_count": 119,
+        "snapshot_id": "snap_679d4a0108f86d67_r0001_f9c3ed110c11",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "53363b3f4596d6184f15b4dc267381e00da2f37fd92c709abb8d402dfb75074e",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 119,
+        "snapshot_id": "snap_9d97b3fce0a831e7_r0001_1be821b73227",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      }
+    ],
+    "SEC_1403c112c87f": [
+      {
+        "content_checksum": "c093fc2cd1bf73a7b2a6c1e26979cfc488bd4ee2c28fdc58570a4d4d08eaa328",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 1592,
+        "snapshot_id": "snap_2dcf243107329a5b_r0001_def136fbe0a2",
+        "snapshot_status": "COMPLETE",
+        "source": "isyatirim",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "4b3eba1077910352ef1dbe89f79d6d49a1a5b9768cd5fd07115d65006ca44919",
+        "input_snapshot_ids": [
+          "snap_e3be00ded92114e2_r0001_f3523538bdb9"
+        ],
+        "layer": "derived",
+        "row_count": 1595,
+        "snapshot_id": "snap_5c091bee6e66c52d_r0001_8add9e3eaae7",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      },
+      {
+        "content_checksum": "b1883af3de8a14d71e9c2db8db803a92010c6d1bb441027bdf863d7ab151d1d9",
+        "input_snapshot_ids": [],
+        "layer": "raw",
+        "row_count": 1595,
+        "snapshot_id": "snap_e3be00ded92114e2_r0001_f3523538bdb9",
+        "snapshot_status": "COMPLETE",
+        "source": "yfinance",
+        "used_security_count": 0
+      }
     ]
   },
   "collection_start_date": "2020-03-13",
   "collection_summary": {
-    "attempted_security_count": 35,
+    "attempted_security_count": 43,
     "clean_success_rate": 0.0,
-    "collection_attempted_count": 35,
-    "complete_security_count": 17,
+    "collection_attempted_count": 43,
+    "complete_security_count": 22,
     "failed_security_count": 0,
-    "first_pass_complete_count": 17,
+    "first_pass_complete_count": 22,
     "identity_success_rate": 0.0,
-    "isyatirim_success_rate": 0.4857142857142857,
+    "isyatirim_success_rate": 0.5116279069767442,
     "label_success_rate": 0.0,
     "master_security_count": 621,
     "no_history_security_count": 4,
-    "nominal_success_rate": 0.8857142857142857,
-    "partial_security_count": 14,
+    "nominal_success_rate": 0.9069767441860465,
+    "partial_security_count": 17,
     "provider_success_rate_denominator": "attempted_security_count; PENDING/UNATTEMPTED excluded",
     "retry_pass_attempted_count": 0,
     "retry_pass_recovered_count": 0,
     "retry_pass_remaining_failed_count": 0,
     "retry_pass_remaining_partial_count": 0,
-    "unattempted_security_count": 586,
-    "yfinance_success_rate": 0.8857142857142857
+    "unattempted_security_count": 578,
+    "yfinance_success_rate": 0.9069767441860465
   },
   "derived_chain_started": false,
   "excluded_security_ids": [],
@@ -1186,7 +1458,7 @@
   "first_pass_finished_at_utc": null,
   "first_pass_security_budget_seconds": 1200.0,
   "first_pass_started_at_utc": "2026-07-31T00:10:58.444625Z",
-  "last_checkpoint_at_utc": "2026-08-02T21:05:09.709048Z",
+  "last_checkpoint_at_utc": "2026-08-03T00:33:31.050604Z",
   "lightgbm_training_run": false,
   "manifest_file_checksum": "31a430ac5acc234556ea01616f70947fcef16185a251c4a70eb4b48be9f6825a",
   "manifest_path": "reports/universe/full_history_collection_manifest_v1.csv",
@@ -1212,6 +1484,30 @@
       "snapshot_id": "snap_0162faee9fc6a220_r0001_a9b59d42b68c",
       "snapshot_status": "FAILED",
       "source": "isyatirim",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "72c4c761ffdbde0e5a140b0738de6f34daafd152507af70bc68b04cda78de234",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 116,
+      "security_id": "SEC_13959c05932c",
+      "snapshot_id": "snap_017f9fcb563df674_r0001_6fbebb18e265",
+      "snapshot_status": "PARTIAL",
+      "source": "isyatirim",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "ea0131548eb2b9c167aa874175a9238f642aee883729ea7533a8897f1574a2ec",
+      "input_snapshot_ids": [
+        "snap_fd64b4e2bffcbedf_r0001_4fe8d199ec8a"
+      ],
+      "layer": "derived",
+      "row_count": 588,
+      "security_id": "SEC_13608480fa8d",
+      "snapshot_id": "snap_03843b7aa777b68f_r0001_44efaea6d37f",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
       "used_security_count": 0
     },
     {
@@ -1270,6 +1566,19 @@
       "used_security_count": 0
     },
     {
+      "content_checksum": "204be3098729399c7e8bc1c9f1691948b2c22530496f81fa0b847f6705d432eb",
+      "input_snapshot_ids": [
+        "snap_72543e392cf64b97_r0001_dfab90805551"
+      ],
+      "layer": "derived",
+      "row_count": 1595,
+      "security_id": "SEC_13296ba3d2d5",
+      "snapshot_id": "snap_116cd9f4b1250b1d_r0001_7c094d30e051",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
       "content_checksum": "b9f6aefefb0888078e18892a756d618cde2c2d2196732d4268ff7acedc6996e5",
       "input_snapshot_ids": [
         "snap_babc2849b067de44_r0001_102d8983a2c0"
@@ -1293,6 +1602,17 @@
       "snapshot_id": "snap_13b628b9b06e78ac_r0001_019eb92f0b6d",
       "snapshot_status": "COMPLETE",
       "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 0,
+      "security_id": "SEC_1073193e5afd",
+      "snapshot_id": "snap_17187e041fc378db_r0001_a9b59d42b68c",
+      "snapshot_status": "FAILED",
+      "source": "isyatirim",
       "used_security_count": 0
     },
     {
@@ -1339,6 +1659,28 @@
       "snapshot_id": "snap_207b6fe86fd44b0c_r0001_ca916cc2a65d",
       "snapshot_status": "COMPLETE",
       "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "7c15c2da634c7350adf6fb72b5881ae1fceae7bcdd205e22e3b7d21b9190acd1",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 1596,
+      "security_id": "SEC_12d182ed0464",
+      "snapshot_id": "snap_2717eecf15124bf6_r0001_e124fe829efb",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "c093fc2cd1bf73a7b2a6c1e26979cfc488bd4ee2c28fdc58570a4d4d08eaa328",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 1592,
+      "security_id": "SEC_1403c112c87f",
+      "snapshot_id": "snap_2dcf243107329a5b_r0001_def136fbe0a2",
+      "snapshot_status": "COMPLETE",
+      "source": "isyatirim",
       "used_security_count": 0
     },
     {
@@ -1442,6 +1784,19 @@
       "row_count": 15,
       "security_id": "SEC_0b8e51d544b2",
       "snapshot_id": "snap_42dd046831736dc7_r0001_6a26d7f98bc1",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "2914921962aaec6e8031613c2601f4e293ac2c23848a0aca4f1c4c522013a8d2",
+      "input_snapshot_ids": [
+        "snap_705d34e98c16d622_r0001_14ec4df6dad3"
+      ],
+      "layer": "derived",
+      "row_count": 1595,
+      "security_id": "SEC_12b6aed35853",
+      "snapshot_id": "snap_42e20d91a009f9bf_r0001_833d8a7c3794",
       "snapshot_status": "COMPLETE",
       "source": "yfinance",
       "used_security_count": 0
@@ -1578,6 +1933,17 @@
       "used_security_count": 0
     },
     {
+      "content_checksum": "3fee5b3438335075efe14e10017c7460a48176a621049d20e4c2e0dea2ddfa35",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 1592,
+      "security_id": "SEC_13296ba3d2d5",
+      "snapshot_id": "snap_550fdeeb13dbe010_r0001_ebbf220c58a7",
+      "snapshot_status": "COMPLETE",
+      "source": "isyatirim",
+      "used_security_count": 0
+    },
+    {
       "content_checksum": "78e5e342ed1bf04c60efa3b55d3aab4cbf2396bda15e770e09971522b4315ea8",
       "input_snapshot_ids": [],
       "layer": "raw",
@@ -1613,12 +1979,38 @@
       "used_security_count": 0
     },
     {
+      "content_checksum": "4b3eba1077910352ef1dbe89f79d6d49a1a5b9768cd5fd07115d65006ca44919",
+      "input_snapshot_ids": [
+        "snap_e3be00ded92114e2_r0001_f3523538bdb9"
+      ],
+      "layer": "derived",
+      "row_count": 1595,
+      "security_id": "SEC_1403c112c87f",
+      "snapshot_id": "snap_5c091bee6e66c52d_r0001_8add9e3eaae7",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
       "content_checksum": "6f1a89597d86104b633a412b400fd652f4c299bf2950a19436b570bbe38718cf",
       "input_snapshot_ids": [],
       "layer": "raw",
       "row_count": 1595,
       "security_id": "SEC_0fd09e17c997",
       "snapshot_id": "snap_672ef213ec44592e_r0001_c1a7f770508c",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "acc4a07149f4ec4f7f53176d0424f07b3cfa92fdc373e9b036af987d458dfc9b",
+      "input_snapshot_ids": [
+        "snap_9d97b3fce0a831e7_r0001_1be821b73227"
+      ],
+      "layer": "derived",
+      "row_count": 119,
+      "security_id": "SEC_13959c05932c",
+      "snapshot_id": "snap_679d4a0108f86d67_r0001_f9c3ed110c11",
       "snapshot_status": "COMPLETE",
       "source": "yfinance",
       "used_security_count": 0
@@ -1685,6 +2077,17 @@
       "used_security_count": 0
     },
     {
+      "content_checksum": "d790b0c9840c1f1d47e1f771e0a9de24e9887f8a5eed02e0c9fdf7a00c2ec828",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 1595,
+      "security_id": "SEC_12b6aed35853",
+      "snapshot_id": "snap_705d34e98c16d622_r0001_14ec4df6dad3",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
       "content_checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "input_snapshot_ids": [],
       "layer": "raw",
@@ -1692,6 +2095,17 @@
       "security_id": "SEC_0f4bd7b320a7",
       "snapshot_id": "snap_708a96b5fd9d032c_r0001_a9b59d42b68c",
       "snapshot_status": "FAILED",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "0fca5208a107a622d8e1c70da49bdc8e42d1e2757fa89d698a938b2074383f33",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 1595,
+      "security_id": "SEC_13296ba3d2d5",
+      "snapshot_id": "snap_72543e392cf64b97_r0001_dfab90805551",
+      "snapshot_status": "COMPLETE",
       "source": "yfinance",
       "used_security_count": 0
     },
@@ -1915,6 +2329,17 @@
       "used_security_count": 0
     },
     {
+      "content_checksum": "53363b3f4596d6184f15b4dc267381e00da2f37fd92c709abb8d402dfb75074e",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 119,
+      "security_id": "SEC_13959c05932c",
+      "snapshot_id": "snap_9d97b3fce0a831e7_r0001_1be821b73227",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
       "content_checksum": "674e29e6264548d06d4ca85088779a05ed69f4200680031eb5aed0e7bf593c87",
       "input_snapshot_ids": [],
       "layer": "raw",
@@ -2011,12 +2436,36 @@
       "used_security_count": 0
     },
     {
+      "content_checksum": "b7f19b072fcc00804de806396d6eea1dd6e82ff585c72e81fc8de00773a96baf",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 1592,
+      "security_id": "SEC_12b6aed35853",
+      "snapshot_id": "snap_b924f1af6f5d43c8_r0001_5e5a319eaea5",
+      "snapshot_status": "COMPLETE",
+      "source": "isyatirim",
+      "used_security_count": 0
+    },
+    {
       "content_checksum": "6e200e0ff25b0dce6e26ac214df3aa7df2a2d08567ac79141f736d91be45715d",
       "input_snapshot_ids": [],
       "layer": "raw",
       "row_count": 1180,
       "security_id": "SEC_0c504aad266b",
       "snapshot_id": "snap_babc2849b067de44_r0001_102d8983a2c0",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "1a293b3e563f32dbd73853a7f0964b6ab202b6101c544d72c371a6a3926b14ab",
+      "input_snapshot_ids": [
+        "snap_df2cc576795969fb_r0001_8a565458fab4"
+      ],
+      "layer": "derived",
+      "row_count": 368,
+      "security_id": "SEC_1073193e5afd",
+      "snapshot_id": "snap_bb009847368c8452_r0001_9d13f73b3276",
       "snapshot_status": "COMPLETE",
       "source": "yfinance",
       "used_security_count": 0
@@ -2041,6 +2490,28 @@
       "row_count": 1347,
       "security_id": "SEC_02ba05412e2f",
       "snapshot_id": "snap_c4339b6006c9cd9b_r0001_0f41ae01cfc5",
+      "snapshot_status": "COMPLETE",
+      "source": "isyatirim",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "9609d8411219acc3ff991a1ca3a6aa9c3a2b9d92123a740a89374e85e20b063c",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 783,
+      "security_id": "SEC_13608480fa8d",
+      "snapshot_id": "snap_c61b12bd31fd0001_r0001_1a3de6a9f602",
+      "snapshot_status": "PARTIAL",
+      "source": "isyatirim",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "0d9d51b8015b6599007859ad4afeaaa63779068eea2b27b448a88c20d49332dc",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 1592,
+      "security_id": "SEC_12b14ce2953d",
+      "snapshot_id": "snap_c9b9597a555ed801_r0001_564149443aeb",
       "snapshot_status": "COMPLETE",
       "source": "isyatirim",
       "used_security_count": 0
@@ -2103,6 +2574,17 @@
       "used_security_count": 0
     },
     {
+      "content_checksum": "8be558af07e80d17505fc3150c5e9af73a2da2cdd2f31322665b780332ab43ae",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 1595,
+      "security_id": "SEC_12b14ce2953d",
+      "snapshot_id": "snap_dddff6f80f96aca5_r0001_f5c9229ac33d",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
       "content_checksum": "df4d80b353e63f027899830b0440c8da20ce8b5c257db496cb186cfd05792f11",
       "input_snapshot_ids": [],
       "layer": "raw",
@@ -2120,6 +2602,28 @@
       "row_count": 1258,
       "security_id": "SEC_06e6e10559a8",
       "snapshot_id": "snap_de850cd821984f65_r0001_a6962261e802",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "5e3faa0d7371ad6338bd7d16f8458305c091dcc304b459bdd25c949518ff22c9",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 1592,
+      "security_id": "SEC_12d182ed0464",
+      "snapshot_id": "snap_dee70b98b61ea537_r0001_927be4114b1e",
+      "snapshot_status": "COMPLETE",
+      "source": "isyatirim",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "346b7d68b9525dec8150cdc9a5614b316f11d059a31428c5b6db296e8e04abaf",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 368,
+      "security_id": "SEC_1073193e5afd",
+      "snapshot_id": "snap_df2cc576795969fb_r0001_8a565458fab4",
       "snapshot_status": "COMPLETE",
       "source": "yfinance",
       "used_security_count": 0
@@ -2166,6 +2670,17 @@
       "snapshot_id": "snap_e31600b04e7e5730_r0001_4c262edc5034",
       "snapshot_status": "COMPLETE",
       "source": "isyatirim",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "b1883af3de8a14d71e9c2db8db803a92010c6d1bb441027bdf863d7ab151d1d9",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 1595,
+      "security_id": "SEC_1403c112c87f",
+      "snapshot_id": "snap_e3be00ded92114e2_r0001_f3523538bdb9",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
       "used_security_count": 0
     },
     {
@@ -2225,6 +2740,19 @@
       "snapshot_id": "snap_ec86d5edc11f1864_r0001_a9b59d42b68c",
       "snapshot_status": "FAILED",
       "source": "isyatirim",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "2c6d4f817c7cb5d521fb896fc8c0223f40391e4aee01a681f4def29ed97c281a",
+      "input_snapshot_ids": [
+        "snap_dddff6f80f96aca5_r0001_f5c9229ac33d"
+      ],
+      "layer": "derived",
+      "row_count": 1595,
+      "security_id": "SEC_12b14ce2953d",
+      "snapshot_id": "snap_ecedfb1601a350d1_r0001_2dc2ce13e900",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
       "used_security_count": 0
     },
     {
@@ -2353,6 +2881,17 @@
       "used_security_count": 0
     },
     {
+      "content_checksum": "c9bb7d599f1bac7e2341d595f6f0361dff0fcb1764f2f46cad54294bfc52efcb",
+      "input_snapshot_ids": [],
+      "layer": "raw",
+      "row_count": 588,
+      "security_id": "SEC_13608480fa8d",
+      "snapshot_id": "snap_fd64b4e2bffcbedf_r0001_4fe8d199ec8a",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
+      "used_security_count": 0
+    },
+    {
       "content_checksum": "80bf430cfd1949368080c1a1812d100848ad40f05393743194199a646e3b2e0e",
       "input_snapshot_ids": [
         "snap_cea651960f0dd41f_r0001_30210bb10a18"
@@ -2374,6 +2913,19 @@
       "snapshot_id": "snap_fe6e90b5d3979b81_r0001_a9b59d42b68c",
       "snapshot_status": "FAILED",
       "source": "isyatirim",
+      "used_security_count": 0
+    },
+    {
+      "content_checksum": "5c34c4dfa886bba588452b3e9a326553fcd18e2ec4b598cecf5e1a9f7f9f7540",
+      "input_snapshot_ids": [
+        "snap_2717eecf15124bf6_r0001_e124fe829efb"
+      ],
+      "layer": "derived",
+      "row_count": 1596,
+      "security_id": "SEC_12d182ed0464",
+      "snapshot_id": "snap_ffd1d953f9be7073_r0001_e59a7cd59b0c",
+      "snapshot_status": "COMPLETE",
+      "source": "yfinance",
       "used_security_count": 0
     }
   ],
