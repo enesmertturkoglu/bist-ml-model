@@ -8,11 +8,15 @@ BİST hisselerini, T+1 açılışından sonraki üç BİST işlem günü içinde
 
 Veri toplama ve değişmez snapshot, temizleme ve uygunluk, üç işlem günlük label, security identity/tarih-etkin ticker mapping, doğrulanmış XU100, global BİST takvimi, tam 32 `baseline_v1` feature pipeline'ı ve leakage-safe LightGBM expanding walk-forward eğitim/artifact altyapısı tamamlandı. Resmî kaynaklı `bist_active_universe_v1`, `2026-07-29` as-of tarihinde 621 security ile donduruldu. İlk gerçek model deneyi henüz çalıştırılmadı.
 
-`scripts/run_full_history_pipeline.py` iki turlu, security-geneli süre bütçeli ve atomik checkpoint'li resumable orchestration olarak hazırdır. Son tutarlı production checkpoint'i 43/621 security'nin denendiğini gösterir: 22 COMPLETE, 17 PARTIAL, 4 NO_HISTORY ve 578 UNATTEMPTED. Sıradaki security EKSUN'dur. Koşuyu checksum doğrulamalı snapshot/cache reuse ile sürdürmek için:
+`scripts/run_full_history_pipeline.py` iki turlu, security-geneli süre bütçeli, empty-range cache'li ve tek-yazarlı atomik checkpoint kullanan resumable orchestration olarak hazırdır. HTTP 200 `{"value":[]}` `NO_DATA_IN_RANGE` olur ve retry/split üretmez. Varsayılan üç security worker process-geneli en fazla iki eşzamanlı İş Yatırım request'i kullanır. Son tutarlı production checkpoint'i 43/621 security'nin denendiğini gösterir: 22 COMPLETE, 17 PARTIAL, 4 NO_HISTORY ve 578 UNATTEMPTED. Sıradaki security EKSUN'dur. Koşuyu checksum doğrulamalı snapshot/cache reuse ile sürdürmek için:
 
 ```powershell
-python -u scripts/run_full_history_pipeline.py
+python -u scripts/run_full_history_pipeline.py `
+  --security-workers 3 `
+  --isyatirim-max-concurrency 2
 ```
+
+Tek worker güvenli fallback'i `--security-workers 1` seçeneğidir. `--refresh` yalnız bilinçli yeniden sorgulama için kullanılır; normal resume komutunda verilmez.
 
 Collection'ın iki turu bitmeden derived zincir tamamlanmış deney verisi sayılmaz, `experiment_ready=true` olamaz ve gerçek LightGBM performans deneyine geçilmez.
 

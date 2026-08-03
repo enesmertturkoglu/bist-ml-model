@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+import json
 from pathlib import Path
+import threading
+import time
 from typing import Any
 
 import pandas as pd
@@ -11,10 +15,12 @@ import requests
 
 from src.data.isyatirim_client import (
     CACHE_SCHEMA_VERSION,
+    GlobalRequestLimiter,
     TIME_BUDGET_EXCEEDED,
     IsYatirimClient,
     IsYatirimBudgetFetchError,
     IsYatirimFetchError,
+    NO_DATA_IN_RANGE,
     split_date_range,
 )
 
@@ -37,6 +43,11 @@ class FakeResponse:
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
+
+
+class InvalidJsonResponse(FakeResponse):
+    def json(self) -> object:
+        raise ValueError("truncated JSON")
 
 
 class QueueSession:
@@ -327,6 +338,39 @@ def test_permanent_schema_error_is_not_retried(tmp_path: Path) -> None:
     assert captured.value.failures[0].error_type == "IsYatirimSchemaError"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"value": {}},
+        {"value": [{**_row("not-a-date")}]},
+        {
+            "value": [
+                {
+                    **_row("01-01-2024"),
+                    "HGDG_HS_KODU": "OTHER",
+                }
+            ]
+        },
+    ],
+)
+def test_permanent_value_date_and_ticker_schema_errors_never_retry_or_split(
+    tmp_path: Path, payload: object
+) -> None:
+    client, session = _client(
+        tmp_path,
+        [FakeResponse(payload)],
+        max_retries=5,
+    )
+
+    with pytest.raises(IsYatirimFetchError) as captured:
+        client.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+
+    assert len(session.calls) == 1
+    assert captured.value.failures[0].error_type == "IsYatirimSchemaError"
+    assert client.stats.retry_count == 0
+    assert client.stats.split_to_six_month_count == 0
+
+
 def test_sleep_and_jitter_are_injected_without_real_wait(tmp_path: Path) -> None:
     sleeps: list[float] = []
     client, _ = _client(
@@ -374,6 +418,253 @@ def test_refresh_cache_bypasses_existing_entry(tmp_path: Path) -> None:
     assert len(session.calls) == 1
     assert result.loc[0, "HGDG_TARIH"] == pd.Timestamp("2024-01-02")
     assert CACHE_SCHEMA_VERSION in next(tmp_path.glob("*.json")).name
+
+
+def test_http_200_empty_value_is_cached_without_retry_or_split(tmp_path: Path) -> None:
+    client, session = _client(
+        tmp_path,
+        [FakeResponse({"value": []})],
+        max_retries=5,
+    )
+
+    result = client.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+
+    assert result.empty
+    assert result.attrs["result"] == NO_DATA_IN_RANGE
+    assert len(session.calls) == 1
+    assert client.stats.retry_count == 0
+    assert client.stats.split_to_six_month_count == 0
+    assert client.stats.split_to_three_month_count == 0
+    assert client.stats.no_data_range_count == 1
+    metadata = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
+    assert metadata["result"] == NO_DATA_IN_RANGE
+    assert metadata["schema_validation"]["status"] == "PASS"
+    assert metadata["cache_schema_version"] == CACHE_SCHEMA_VERSION
+    assert metadata["checksum"]
+    assert not list(tmp_path.glob("*.csv"))
+
+
+def test_empty_range_cache_hit_blocks_network_and_refresh_requeries(
+    tmp_path: Path,
+) -> None:
+    first, _ = _client(tmp_path, [FakeResponse({"value": []})])
+    first.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+    resumed, resumed_session = _client(tmp_path, [])
+
+    cached = resumed.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+
+    assert cached.empty
+    assert not resumed_session.calls
+    assert resumed.stats.empty_range_cache_hits == 1
+
+    refreshed = IsYatirimClient(
+        session=QueueSession([_response("01-01-2024")]),
+        cache_dir=tmp_path,
+        max_retries=1,
+        request_delay_seconds=0,
+        refresh_cache=True,
+        sleep_func=lambda _: None,
+        random_func=lambda: 0.0,
+    )
+    result = refreshed.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+    assert len(result) == 1
+    assert refreshed.stats.network_requests == 1
+
+
+def test_corrupt_empty_range_cache_fails_closed_and_requeries(tmp_path: Path) -> None:
+    first, _ = _client(tmp_path, [FakeResponse({"value": []})])
+    first.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+    metadata_path = next(tmp_path.glob("*.json"))
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["checksum"] = "0" * 64
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    second, session = _client(tmp_path, [FakeResponse({"value": []})])
+
+    result = second.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+
+    assert result.empty
+    assert len(session.calls) == 1
+    assert second.stats.cache_corruption_count == 1
+
+
+def test_empty_year_does_not_block_other_populated_year(tmp_path: Path) -> None:
+    client, session = _client(
+        tmp_path,
+        [FakeResponse({"value": []}), _response("01-01-2025")],
+    )
+
+    result = client.fetch_history("THYAO", "2024-01-01", "2025-12-31")
+
+    assert len(session.calls) == 2
+    assert result["HGDG_TARIH"].tolist() == [pd.Timestamp("2025-01-01")]
+    assert client.stats.no_data_range_count == 1
+
+
+def test_populated_response_entirely_outside_range_is_permanent_schema_error(
+    tmp_path: Path,
+) -> None:
+    client, session = _client(
+        tmp_path,
+        [_response("31-12-2023")],
+        max_retries=5,
+    )
+
+    with pytest.raises(IsYatirimFetchError) as captured:
+        client.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+
+    assert len(session.calls) == 1
+    assert captured.value.failures[0].error_type == "IsYatirimSchemaError"
+    assert "outside the requested date range" in captured.value.failures[0].message
+
+
+@pytest.mark.parametrize(
+    "responses, message",
+    [
+        ([InvalidJsonResponse(None), InvalidJsonResponse(None)], "Invalid JSON"),
+        ([FakeResponse({}), FakeResponse({})], "missing the 'value' field"),
+    ],
+)
+def test_transient_response_envelope_errors_retry_bounded_without_split(
+    tmp_path: Path,
+    responses: list[FakeResponse],
+    message: str,
+) -> None:
+    client, session = _client(tmp_path, responses, max_retries=2)
+
+    with pytest.raises(IsYatirimFetchError) as captured:
+        client.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+
+    assert len(session.calls) == 2
+    assert client.stats.retry_count == 1
+    assert client.stats.split_to_six_month_count == 0
+    assert client.stats.split_to_three_month_count == 0
+    assert message in captured.value.failures[0].message
+
+
+def test_connection_error_uses_bounded_retry(tmp_path: Path) -> None:
+    client, session = _client(
+        tmp_path,
+        [requests.ConnectionError("reset"), _response("01-01-2024")],
+        max_retries=2,
+    )
+
+    result = client.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+
+    assert len(result) == 1
+    assert len(session.calls) == 2
+    assert client.stats.connection_error_count == 1
+    assert client.stats.retry_count == 1
+
+
+def test_legacy_v1_non_empty_cache_remains_readable(tmp_path: Path) -> None:
+    first, _ = _client(tmp_path, [_response("01-01-2024")])
+    first.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+    metadata_path = next(tmp_path.glob("*.json"))
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    for field in (
+        "fetch_timestamp",
+        "result",
+        "schema_validation",
+        "checksum",
+    ):
+        metadata.pop(field)
+    metadata["cache_schema_version"] = "v1"
+    legacy_path = metadata_path.with_name(metadata_path.name.replace("v2_", "v1_", 1))
+    legacy_path.write_text(json.dumps(metadata), encoding="utf-8")
+    metadata_path.unlink()
+    second, session = _client(tmp_path, [])
+
+    result = second.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+
+    assert len(result) == 1
+    assert not session.calls
+
+
+def test_v2_empty_coverage_takes_precedence_over_overlapping_legacy_v1(
+    tmp_path: Path,
+) -> None:
+    first, _ = _client(tmp_path, [_response("01-01-2024")])
+    first.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+    current_path = next(tmp_path.glob("*.json"))
+    legacy = json.loads(current_path.read_text(encoding="utf-8"))
+    for field in (
+        "fetch_timestamp",
+        "result",
+        "schema_validation",
+        "checksum",
+    ):
+        legacy.pop(field)
+    legacy["cache_schema_version"] = "v1"
+    current_path.with_name(current_path.name.replace("v2_", "v1_", 1)).write_text(
+        json.dumps(legacy), encoding="utf-8"
+    )
+    refreshed = IsYatirimClient(
+        session=QueueSession([FakeResponse({"value": []})]),
+        cache_dir=tmp_path,
+        refresh_cache=True,
+        max_retries=1,
+        request_delay_seconds=0,
+        sleep_func=lambda _: None,
+        random_func=lambda: 0.0,
+    )
+    refreshed.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+    resumed, session = _client(tmp_path, [])
+
+    result = resumed.fetch_history("THYAO", "2024-01-01", "2024-12-31")
+
+    assert result.empty
+    assert not session.calls
+    assert resumed.stats.empty_range_cache_hits == 1
+
+
+def test_process_global_limiter_never_exceeds_two_concurrent_requests(
+    tmp_path: Path,
+) -> None:
+    class ConcurrentSession:
+        def __init__(self) -> None:
+            self.lock = threading.Lock()
+            self.active = 0
+            self.maximum = 0
+
+        def get(self, *_: object, **__: object) -> FakeResponse:
+            with self.lock:
+                self.active += 1
+                self.maximum = max(self.maximum, self.active)
+            try:
+                time.sleep(0.05)
+                return _response("01-01-2024")
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    session = ConcurrentSession()
+    limiter = GlobalRequestLimiter(
+        max_concurrency=2, request_interval_seconds=0
+    )
+    clients = [
+        IsYatirimClient(
+            session=session,
+            cache_dir=tmp_path / str(index),
+            max_retries=1,
+            request_delay_seconds=0,
+            request_limiter=limiter,
+        )
+        for index in range(3)
+    ]
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        results = list(
+            executor.map(
+                lambda client: client.fetch_history(
+                    "THYAO", "2024-01-01", "2024-12-31"
+                ),
+                clients,
+            )
+        )
+
+    assert all(len(result) == 1 for result in results)
+    assert session.maximum == 2
+    assert limiter.maximum_active_requests == 2
 
 
 def test_security_budget_covers_the_recursive_12_6_3_month_chain(

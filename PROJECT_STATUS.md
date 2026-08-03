@@ -196,6 +196,15 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Process yeniden başlatıldığında daha önce first-pass sonucu checkpoint edilmiş PARTIAL/NO_HISTORY satırların yeniden first-pass provider çağrısı alması gerçek resume açığı olarak doğrulanmıştır. Satır düzeyi latest outcome ve attempt history `collection_outcomes.json` içinde atomik saklanacak şekilde düzeltme uygulanmıştır; eski tutarlı status/summary/provenance/gap raporları güvenli biçimde migrate edilir ve ilk UNATTEMPTED satırdan devam edilir. Production doğrulamasında eski 33 security provider çağrısı yapılmadan checkpoint hit ile atlanmış, koşu EYGYO'dan başlamış ve EYGYO ile NTHOL sonuçları atomik kaydedilmiştir.
 - Production collection checkpoint'i MOPAS–ATSYH aralığındaki sekiz security'nin first-pass sonuçlarıyla ilerlemiştir. Son tutarlı durum `43 attempted / 22 complete / 17 partial / 0 failed / 4 no-history / 578 unattempted`; son denenen security ATSYH, sıradaki EKSUN'dur. Raporlar 621 tekil security ile tutarlıdır; derived zincir başlamamış ve `experiment_ready=false` kalmıştır.
 
+## Empty-Range ve Kontrollü Paralel Collection — 2026-08-03
+
+- D036 ile HTTP 200 `{"value":[]}` artık `NO_DATA_IN_RANGE` olur; retry/adaptive split üretmez ve checksum'lı v2 operational coverage cache'ine yazılır. Resume cache hit'i network'ü engeller, `--refresh` yeniden sorgular, bozuk cache fail-closed yeniden indirilir ve eski v1 dolu cache kayıtları silinmeden okunur.
+- yFinance ilk gözlem tarihi yalnız İş Yatırım yıllık request sırasını belirleyen operational hint'tir. Hiçbir tarih aralığı atlanmaz, collection başlangıcı `2020-03-13` kalır, alias veya mapping CSV değişikliği üretilmez.
+- Varsayılan `security_worker_count=3`, process-geneli `isyatirim_max_concurrency=2` ve `global_request_interval_seconds=1.0` oldu. Worker fetch/parse/DataFrame/telemetri hazırlar; tek coordinator snapshot manifest/revision ile bütün full-history checkpoint raporlarını manifest/security sırasıyla yazar.
+- Mevcut production checkpoint yeni kodla `43` row outcome, `22` fiziksel checksum-doğrulanmış COMPLETE, first pass bitmemiş ve retry pass başlamamış olarak yeniden doğrulandı. İlk yeni security hâlâ EKSUN'dur; production raporları benchmark sırasında değiştirilmedi.
+- Gerçek izole benchmark AEFES, MOPAS ve IZENR üzerinde workers `1/2/3` ile tamamlandı. Üç koşuda status, gap sınıfı ve İş Yatırım/yFinance/nominal checksum'ları aynı kaldı. Toplam süreler sırasıyla `96.768 / 131.234 / 54.227` saniye; gözlenen global İş Yatırım concurrency `1 / 2 / 2` oldu. MOPAS workers=1 sonucu `8` toplam network request, `0` retry, `4` empty range ve `12.866` saniyedir; eski production sonucu `134 request / 106 retry / 1204.540 saniye` idi. Gerçek resume `0` network, `7` cache hit ve `4` empty-range cache hit verdi.
+- Tam regresyon `352 passed` tamamlandı; `compileall`, `pip check` ve `git diff --check` başarılıdır. Gerçek LightGBM çağrılmadı, 32 feature/model/walk-forward kararları değişmedi ve `EXPERIMENT_LOG.md` oluşturulmadı.
+
 ## Kesinleşen Başlangıç Senaryosu
 
 - Tahmin zamanı: `T` günü piyasa kapandıktan sonra
@@ -242,8 +251,8 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Görevler
 
-1. `python -u scripts/run_full_history_pipeline.py` komutuyla production collection'ı 43/621 checkpoint'inden ve EKSUN satırından sürdür.
-2. 621 security'nin tamamını iki turlu D035 akışıyla dene; doğrulanmış SNGYO ve diğer COMPLETE snapshot/cache kapsamını yeniden fetch etme.
+1. `python -u scripts/run_full_history_pipeline.py --security-workers 3 --isyatirim-max-concurrency 2` komutuyla production collection'ı 43/621 checkpoint'inden ve EKSUN satırından sürdür.
+2. 621 security'nin tamamını D035 iki turlu bütçe ve D036 kontrollü paralellik akışıyla dene; doğrulanmış COMPLETE snapshot/cache kapsamını yeniden fetch etme.
 3. Collection tamamlandıktan sonra identity, clean, label, XU100, exact 32 `baseline_v1`, prediction universe ve veri-kalitesi raporlarını üret.
 4. Fold feasibility sonuçlarını LightGBM eğitmeden incele.
 5. İlk gerçek 20 oturumluk test başlangıç tarihini ayrı kararla kesinleştir.

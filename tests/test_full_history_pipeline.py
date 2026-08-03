@@ -17,6 +17,8 @@ from src.data.full_history_pipeline import (
     FullHistoryPaths,
     FullHistoryPipeline,
     ManifestOutcome,
+    PreparedManifestRow,
+    PreparedSecurity,
     atomic_write_text,
     build_collection_failures,
     build_collection_gaps,
@@ -25,6 +27,7 @@ from src.data.full_history_pipeline import (
     build_mapping_review,
 )
 from src.data.collectors import ProviderGap
+from src.data.isyatirim_client import GlobalRequestLimiter, NO_DATA_IN_RANGE
 from src.data.security_identity import MAPPING_COLUMNS, TickerMapping, generate_security_id
 from src.data.snapshot_store import SnapshotRequest, SnapshotStore
 
@@ -649,3 +652,170 @@ def test_retry_remaining_security_is_excluded_from_derived_scope(
     assert captured_used == (str(first.security_id),)
     assert result.used_security_ids == (str(first.security_id),)
     assert result.excluded_security_ids == (str(second.security_id),)
+
+
+def test_verified_empty_both_provider_history_classifies_no_history(
+    tmp_path: Path,
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    preflight = pipeline.preflight()
+    row = preflight.manifest.iloc[0]
+    outcome = ManifestOutcome(
+        row_number=0,
+        security_id=str(row.security_id),
+        current_ticker=str(row.current_ticker),
+        provider_ticker=str(row.provider_ticker),
+        period_start=str(row.period_start),
+        period_end=str(row.period_end),
+        isyatirim_status=NO_DATA_IN_RANGE,
+        yfinance_status="FAILED",
+        nominal_status="FAILED",
+        isyatirim_raw_snapshot_id="",
+        yfinance_raw_snapshot_id="",
+        nominal_snapshot_id="",
+        failure_stage="YFINANCE",
+        failure_class="RuntimeError",
+        failure_reason="yFinance returned no rows for AAA",
+        retry_recommended=False,
+    )
+
+    status = build_collection_status(preflight, [outcome])
+
+    assert status.loc[0, "status"] == "NO_HISTORY"
+    assert status.loc[0, "isyatirim_status"] == NO_DATA_IN_RANGE
+    assert not status.loc[0, "retry_recommended"]
+
+
+def test_empty_old_isyatirim_coverage_with_yfinance_data_is_partial_not_failed(
+    tmp_path: Path,
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    preflight = pipeline.preflight()
+    row = preflight.manifest.iloc[0]
+    outcome = ManifestOutcome(
+        row_number=0,
+        security_id=str(row.security_id),
+        current_ticker=str(row.current_ticker),
+        provider_ticker=str(row.provider_ticker),
+        period_start=str(row.period_start),
+        period_end=str(row.period_end),
+        isyatirim_status=NO_DATA_IN_RANGE,
+        yfinance_status="COMPLETE",
+        nominal_status="COMPLETE",
+        isyatirim_raw_snapshot_id="",
+        yfinance_raw_snapshot_id="yf",
+        nominal_snapshot_id="nominal",
+        yfinance_dates=("2024-01-02",),
+        retry_recommended=False,
+    )
+
+    status = build_collection_status(preflight, [outcome])
+
+    assert status.loc[0, "status"] == "PARTIAL"
+    assert status.loc[0, "failure_class"] == ""
+    assert not status.loc[0, "retry_recommended"]
+
+
+@pytest.mark.parametrize("workers", [1, 3])
+def test_worker_count_preserves_manifest_order_and_unique_security_tasks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    workers: int,
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    pipeline.config = replace(
+        pipeline.config,
+        security_worker_count=workers,
+        global_request_interval_seconds=0,
+    )
+    preflight = pipeline.preflight()
+    security_order = list(preflight.universe["security_id"].astype(str))
+    manifest_groups = {
+        str(key): group.sort_index()
+        for key, group in preflight.manifest.groupby("security_id", sort=False)
+    }
+    eligible = {
+        security_id: tuple(map(int, manifest_groups[security_id].index))
+        for security_id in security_order
+    }
+    active: set[str] = set()
+    seen: list[str] = []
+
+    def fake_collect(
+        _writer: object,
+        row_number: int,
+        row: pd.Series,
+        **_: object,
+    ) -> ManifestOutcome:
+        security_id = str(row["security_id"])
+        seen.append(security_id)
+        return _complete(row_number, security_id, str(row["current_ticker"]))
+
+    def fake_prepare_security(
+        _preflight: object,
+        _limiter: object,
+        security_id: str,
+        security_position: int,
+        rows: pd.DataFrame,
+        **kwargs: object,
+    ) -> PreparedSecurity:
+        assert security_id not in active
+        active.add(security_id)
+        seen.append(security_id)
+        prepared_rows = tuple(
+            PreparedManifestRow(
+                row_number=int(row_number),
+                row=row.to_dict(),
+                prepared=None,
+                error=None,
+                collection_pass=int(kwargs["collection_pass"]),
+                security_position=security_position,
+                security_started_at=0.0,
+                security_budget_seconds=float(kwargs["security_budget_seconds"]),
+                elapsed_seconds=0.0,
+            )
+            for row_number, row in rows.iterrows()
+        )
+        active.remove(security_id)
+        return PreparedSecurity(security_id, security_position, 0.0, prepared_rows)
+
+    def fake_commit(_writer: object, item: PreparedManifestRow) -> ManifestOutcome:
+        return _complete(
+            item.row_number,
+            str(item.row["security_id"]),
+            str(item.row["current_ticker"]),
+        )
+
+    monkeypatch.setattr(pipeline, "_collect_manifest_row", fake_collect)
+    if workers == 3:
+        # Remove the instance override from the worker-count compatibility gate
+        # and patch the class-level methods used by parallel preparation/commit.
+        del pipeline.__dict__["_collect_manifest_row"]
+        monkeypatch.setattr(pipeline, "_prepare_security", fake_prepare_security)
+        monkeypatch.setattr(pipeline, "_commit_prepared_manifest_row", fake_commit)
+    limiter = GlobalRequestLimiter(
+        max_concurrency=2, request_interval_seconds=0
+    )
+
+    results = list(
+        pipeline._collection_pass_results(
+            preflight,
+            object(),
+            limiter,
+            security_order,
+            security_order,
+            manifest_groups,
+            eligible,
+            collection_pass=1,
+            security_budget_seconds=1200,
+            refresh=False,
+        )
+    )
+
+    assert [security_id for _, security_id, _, _ in results] == security_order
+    assert sorted(seen) == sorted(security_order)
+    assert len(seen) == len(set(seen))
+    outcomes = tuple(item for *_, batch in results for item in batch)
+    status = build_collection_status(preflight, outcomes)
+    assert status["security_id"].tolist() == security_order
+    assert status["status"].eq("COMPLETE").all()

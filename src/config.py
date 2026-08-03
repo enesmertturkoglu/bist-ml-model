@@ -203,6 +203,9 @@ class MarketDataConfig:
     # Collection commands must receive an explicit start date while this is None.
     warmup_start_date: date | None = None
     checksum_algorithm: str = "sha256"
+    security_worker_count: int = 3
+    isyatirim_max_concurrency: int = 2
+    global_request_interval_seconds: float = 1.0
     snapshot_statuses: tuple[str, ...] = tuple(status.value for status in SnapshotStatus)
     cleaning: CleaningConfig = field(default_factory=CleaningConfig)
     label: LabelConfig = field(default_factory=LabelConfig)

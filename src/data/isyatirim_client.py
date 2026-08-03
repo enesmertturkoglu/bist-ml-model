@@ -14,7 +14,9 @@ import math
 import os
 import random
 import tempfile
+import threading
 import time
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -28,10 +30,13 @@ BASE_URL = (
     "https://www.isyatirim.com.tr/_layouts/15/"
     "Isyatirim.Website/Common/Data.aspx/HisseTekil"
 )
-CACHE_SCHEMA_VERSION = "v1"
+CACHE_SCHEMA_VERSION = "v2"
+LEGACY_CACHE_SCHEMA_VERSIONS = ("v1",)
 TRANSIENT_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
 IDENTITY_COLUMNS = {"HGDG_HS_KODU", "HGDG_TARIH"}
 TIME_BUDGET_EXCEEDED = "TIME_BUDGET_EXCEEDED"
+NO_DATA_IN_RANGE = "NO_DATA_IN_RANGE"
+DATA_IN_RANGE = "DATA_IN_RANGE"
 
 try:
     import truststore
@@ -119,6 +124,8 @@ class ClientStats:
     timeout_recovered_chunks: int = 0
     failed_chunks: int = 0
     successful_network_chunks: int = 0
+    no_data_range_count: int = 0
+    empty_range_cache_hits: int = 0
     cache_corruption_count: int = 0
     time_budget_exceeded_count: int = 0
     failures: list[RequestFailure] = field(default_factory=list)
@@ -155,6 +162,7 @@ class _AttemptFailure(Exception):
     error: Exception
     attempts: int
     saw_timeout: bool
+    allow_adaptive_split: bool
 
 
 @dataclass(frozen=True)
@@ -182,6 +190,68 @@ class _ProgressContext:
     security_id: str
     manifest_position: int
     manifest_total: int
+
+
+class GlobalRequestLimiter:
+    """Process-wide İş Yatırım concurrency and request-start pacing gate."""
+
+    def __init__(
+        self,
+        *,
+        max_concurrency: int,
+        request_interval_seconds: float,
+        monotonic_func: Callable[[], float] = time.monotonic,
+        sleep_func: Callable[[float], None] = time.sleep,
+    ) -> None:
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least one")
+        if request_interval_seconds < 0:
+            raise ValueError("request_interval_seconds cannot be negative")
+        self.max_concurrency = int(max_concurrency)
+        self.request_interval_seconds = float(request_interval_seconds)
+        self.monotonic_func = monotonic_func
+        self.sleep_func = sleep_func
+        self._semaphore = threading.BoundedSemaphore(self.max_concurrency)
+        self._pacing_lock = threading.Lock()
+        self._counter_lock = threading.Lock()
+        self._next_request_at = 0.0
+        self._active_requests = 0
+        self._maximum_active_requests = 0
+
+    @property
+    def maximum_active_requests(self) -> int:
+        with self._counter_lock:
+            return self._maximum_active_requests
+
+    @contextmanager
+    def slot(
+        self, *, sleep_func: Callable[[float], None] | None = None
+    ) -> Iterable[None]:
+        """Yield one globally paced/concurrency-bounded request slot."""
+
+        sleeper = sleep_func or self.sleep_func
+        with self._pacing_lock:
+            now = float(self.monotonic_func())
+            delay = max(0.0, self._next_request_at - now)
+            if delay:
+                sleeper(delay)
+            paced_at = float(self.monotonic_func())
+            self._next_request_at = (
+                max(self._next_request_at, paced_at)
+                + self.request_interval_seconds
+            )
+        self._semaphore.acquire()
+        try:
+            with self._counter_lock:
+                self._active_requests += 1
+                self._maximum_active_requests = max(
+                    self._maximum_active_requests, self._active_requests
+                )
+            yield
+        finally:
+            with self._counter_lock:
+                self._active_requests -= 1
+            self._semaphore.release()
 
 
 def _coerce_date(value: date | str | pd.Timestamp) -> date:
@@ -265,6 +335,7 @@ class IsYatirimClient:
         ssl_verify: bool = DEFAULT_SSL_VERIFY,
         monotonic_func: Callable[[], float] = time.monotonic,
         progress_func: Callable[[str], None] | None = None,
+        request_limiter: GlobalRequestLimiter | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -289,6 +360,7 @@ class IsYatirimClient:
         self.ssl_verify = ssl_verify
         self.monotonic_func = monotonic_func
         self.progress_func = progress_func
+        self.request_limiter = request_limiter
         self._active_budget: _SecurityBudget | None = None
         self._progress_context: _ProgressContext | None = None
         self.stats = ClientStats(
@@ -311,6 +383,7 @@ class IsYatirimClient:
         security_id: str = "",
         manifest_position: int = 0,
         manifest_total: int = 0,
+        first_observed_hint: date | str | pd.Timestamp | None = None,
     ) -> pd.DataFrame:
         ticker = ticker.strip().upper()
         if not ticker:
@@ -347,15 +420,30 @@ class IsYatirimClient:
             frames: list[pd.DataFrame] = []
             failures: list[RequestFailure] = []
             annual_ranges = split_date_range(start, end, 12)
+            if first_observed_hint is not None:
+                hint = _coerce_date(first_observed_hint)
+                containing = [
+                    item for item in annual_ranges if item[0] <= hint <= item[1]
+                ]
+                if containing:
+                    selected = containing[0]
+                    earlier = [item for item in annual_ranges if item[1] < selected[0]]
+                    later = [item for item in annual_ranges if item[0] > selected[1]]
+                    annual_ranges = [selected, *reversed(earlier), *later]
+                    self._log(
+                        f"[ISYATIRIM][{ticker}] yFinance first-observation hint "
+                        f"used={hint.isoformat()} verification_range="
+                        f"{selected[0].isoformat()}..{selected[1].isoformat()}"
+                    )
             for annual_index, (annual_start, annual_end) in enumerate(annual_ranges):
                 cached_frames: list[pd.DataFrame] = []
                 gaps = [(annual_start, annual_end)]
+                cache_used = False
                 if not self.refresh_cache:
-                    cached_frames, gaps = self._load_cached_coverage(
+                    cached_frames, gaps, cache_used = self._load_cached_coverage(
                         ticker, annual_start, annual_end
                     )
                     frames.extend(cached_frames)
-                cache_used = bool(cached_frames)
                 for gap_index, (gap_start, gap_end) in enumerate(gaps):
                     try:
                         frames.extend(
@@ -385,8 +473,13 @@ class IsYatirimClient:
                         ]:
                             pending_cached: list[pd.DataFrame] = []
                             pending_gaps = [(pending_start, pending_end)]
+                            pending_cache_used = False
                             if not self.refresh_cache:
-                                pending_cached, pending_gaps = self._load_cached_coverage(
+                                (
+                                    pending_cached,
+                                    pending_gaps,
+                                    pending_cache_used,
+                                ) = self._load_cached_coverage(
                                     ticker, pending_start, pending_end
                                 )
                                 frames.extend(pending_cached)
@@ -395,7 +488,7 @@ class IsYatirimClient:
                                     ticker,
                                     pending_gaps,
                                     chunk_months=12,
-                                    cache_used=bool(pending_cached),
+                                    cache_used=pending_cache_used,
                                 )
                             )
                         combined = _merge_frames(frames, start, end)
@@ -410,6 +503,8 @@ class IsYatirimClient:
             combined = _merge_frames(frames, start, end)
             if failures:
                 raise IsYatirimFetchError(failures, partial_data=combined)
+            if combined.empty:
+                combined.attrs["result"] = NO_DATA_IN_RANGE
             return combined
         finally:
             self._active_budget = previous_budget
@@ -463,7 +558,11 @@ class IsYatirimClient:
             self.stats.failures.append(failure)
             raise IsYatirimFetchError([failure]) from error
         except _AttemptFailure as attempt_failure:
-            next_months = self._next_chunk_months(chunk_months)
+            next_months = (
+                self._next_chunk_months(chunk_months)
+                if attempt_failure.allow_adaptive_split
+                else None
+            )
             if next_months is None:
                 failure = RequestFailure(
                     ticker=ticker,
@@ -536,6 +635,14 @@ class IsYatirimClient:
         self.stats.successful_network_chunks += 1
         if saw_timeout or inherited_timeout:
             self.stats.timeout_recovered_chunks += 1
+        if frame.empty:
+            self.stats.no_data_range_count += 1
+            self._write_empty_cache(ticker, start, end)
+            self._log(
+                f"[ISYATIRIM][{ticker}][{start.isoformat()}..{end.isoformat()}] "
+                f"{NO_DATA_IN_RANGE}; retry/split yapılmadı {self._timing_text()}"
+            )
+            return []
         self._write_cache(ticker, start, end, frame)
         return [frame]
 
@@ -573,31 +680,39 @@ class IsYatirimClient:
     ) -> tuple[pd.DataFrame, bool]:
         last_error: Exception | None = None
         saw_timeout = False
+        saw_connection_error = False
         for attempt in range(1, self.max_retries + 1):
             self._ensure_budget_available(ticker, start, end, chunk_months)
             retry_after_seconds: float | None = None
             if attempt > 1:
                 self.stats.retry_count += 1
-            self._pace_request()
-            self._ensure_budget_available(ticker, start, end, chunk_months)
-            self._count_request_size(chunk_months)
-            self.stats.network_requests += 1
-            self._log(
-                f"[ISYATIRIM][{ticker}][{start.isoformat()}..{end.isoformat()}]"
-                f"[{chunk_months}M] request başladı attempt={attempt}/{self.max_retries} "
-                f"{self._timing_text()}"
-            )
             try:
-                response = self.session.get(
-                    BASE_URL,
-                    params={
-                        "hisse": ticker,
-                        "startdate": start.strftime("%d-%m-%Y"),
-                        "enddate": end.strftime("%d-%m-%Y"),
-                    },
-                    timeout=(10, self.timeout_seconds),
-                    verify=self.ssl_verify,
+                if self.request_limiter is None:
+                    self._pace_request()
+                request_slot = (
+                    self.request_limiter.slot(sleep_func=self._sleep_with_budget)
+                    if self.request_limiter is not None
+                    else nullcontext()
                 )
+                with request_slot:
+                    self._ensure_budget_available(ticker, start, end, chunk_months)
+                    self._count_request_size(chunk_months)
+                    self.stats.network_requests += 1
+                    self._log(
+                        f"[ISYATIRIM][{ticker}][{start.isoformat()}..{end.isoformat()}]"
+                        f"[{chunk_months}M] request başladı "
+                        f"attempt={attempt}/{self.max_retries} {self._timing_text()}"
+                    )
+                    response = self.session.get(
+                        BASE_URL,
+                        params={
+                            "hisse": ticker,
+                            "startdate": start.strftime("%d-%m-%Y"),
+                            "enddate": end.strftime("%d-%m-%Y"),
+                        },
+                        timeout=(10, self.timeout_seconds),
+                        verify=self.ssl_verify,
+                    )
                 status_code = int(getattr(response, "status_code", 200))
                 if status_code in TRANSIENT_HTTP_STATUS_CODES:
                     if status_code == 429:
@@ -619,6 +734,7 @@ class IsYatirimClient:
                 last_error = error
             except requests.ConnectionError as error:
                 self.stats.connection_error_count += 1
+                saw_connection_error = True
                 last_error = error
             except TransientProviderError as error:
                 last_error = error
@@ -648,7 +764,12 @@ class IsYatirimClient:
                     backoff = max(backoff, retry_after_seconds)
                 self._sleep_with_budget(backoff + self._jitter())
         assert last_error is not None
-        raise _AttemptFailure(last_error, self.max_retries, saw_timeout)
+        raise _AttemptFailure(
+            last_error,
+            self.max_retries,
+            saw_timeout,
+            saw_timeout or saw_connection_error,
+        )
 
     def _parse_response(
         self, response: Any, ticker: str, start: date, end: date
@@ -665,7 +786,9 @@ class IsYatirimClient:
         if not isinstance(values, list):
             raise IsYatirimSchemaError("Response 'value' field must be a list")
         if not values:
-            raise TransientProviderError("Provider returned an empty 'value' list")
+            empty = pd.DataFrame()
+            empty.attrs["result"] = NO_DATA_IN_RANGE
+            return empty
         frame = pd.DataFrame(values)
         missing = IDENTITY_COLUMNS.difference(frame.columns)
         if missing:
@@ -680,18 +803,21 @@ class IsYatirimClient:
             raise IsYatirimSchemaError(
                 f"Response contains invalid HGDG_TARIH values: {error}"
             ) from error
-        frame = frame[
-            frame["HGDG_TARIH"].between(
-                pd.Timestamp(start), pd.Timestamp(end), inclusive="both"
-            )
-        ]
-        if frame.empty:
-            raise TransientProviderError(
-                "Provider response has no rows inside the requested date range"
-            )
         requested_ticker = frame["HGDG_HS_KODU"].astype(str).str.upper().eq(ticker)
         if not bool(requested_ticker.all()):
             raise IsYatirimSchemaError("Provider response contains an unexpected ticker")
+        in_range = frame["HGDG_TARIH"].between(
+            pd.Timestamp(start), pd.Timestamp(end), inclusive="both"
+        )
+        if not bool(in_range.any()):
+            actual_start = frame["HGDG_TARIH"].min().date().isoformat()
+            actual_end = frame["HGDG_TARIH"].max().date().isoformat()
+            raise IsYatirimSchemaError(
+                "Provider response is entirely outside the requested date range: "
+                f"requested={start.isoformat()}..{end.isoformat()}; "
+                f"actual={actual_start}..{actual_end}"
+            )
+        frame = frame.loc[in_range]
         return _merge_frames([frame], start, end)
 
     def _pace_request(self) -> None:
@@ -797,17 +923,20 @@ class IsYatirimClient:
                 data_temp = Path(handle.name)
                 frame.to_csv(handle, index=False)
             digest = hashlib.sha256(data_temp.read_bytes()).hexdigest()
-            metadata = {
+            metadata: dict[str, Any] = {
                 "cache_schema_version": CACHE_SCHEMA_VERSION,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "fetch_timestamp": datetime.now(timezone.utc).isoformat(),
                 "ticker": ticker,
                 "start_date": start.isoformat(),
                 "end_date": end.isoformat(),
+                "result": DATA_IN_RANGE,
+                "schema_validation": {"status": "PASS"},
                 "columns": list(frame.columns),
                 "row_count": len(frame),
                 "data_file": data_path.name,
                 "sha256": digest,
             }
+            metadata["checksum"] = self._metadata_checksum(metadata)
             with tempfile.NamedTemporaryFile(
                 mode="w",
                 encoding="utf-8",
@@ -826,38 +955,122 @@ class IsYatirimClient:
                 if path is not None and path.exists():
                     path.unlink()
 
+    def _write_empty_cache(self, ticker: str, start: date, end: date) -> None:
+        """Persist verified empty coverage without creating a training snapshot."""
+
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        _, metadata_path = self._cache_paths(ticker, start, end)
+        metadata: dict[str, Any] = {
+            "cache_schema_version": CACHE_SCHEMA_VERSION,
+            "fetch_timestamp": datetime.now(timezone.utc).isoformat(),
+            "ticker": ticker,
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "result": NO_DATA_IN_RANGE,
+            "schema_validation": {
+                "status": "PASS",
+                "http_status": 200,
+                "json_object": True,
+                "value_present": True,
+                "value_is_list": True,
+                "value_is_empty": True,
+            },
+        }
+        metadata["checksum"] = self._metadata_checksum(metadata)
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                suffix=".json.tmp",
+                dir=self.cache_dir,
+                delete=False,
+            ) as handle:
+                temporary_path = Path(handle.name)
+                json.dump(metadata, handle, ensure_ascii=False, indent=2, sort_keys=True)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, metadata_path)
+            temporary_path = None
+        finally:
+            if temporary_path is not None and temporary_path.exists():
+                temporary_path.unlink()
+
     def _load_cached_coverage(
         self, ticker: str, start: date, end: date
-    ) -> tuple[list[pd.DataFrame], list[tuple[date, date]]]:
+    ) -> tuple[list[pd.DataFrame], list[tuple[date, date]], bool]:
         if not self.cache_dir.exists():
-            return [], [(start, end)]
-        entries: list[tuple[date, date, pd.DataFrame]] = []
-        pattern = f"{CACHE_SCHEMA_VERSION}_{ticker}_*.json"
-        for metadata_path in sorted(self.cache_dir.glob(pattern)):
+            return [], [(start, end)], False
+        entries: list[tuple[date, date, int, pd.DataFrame, str]] = []
+        blocked_current_ranges: list[tuple[date, date]] = []
+        versions = (CACHE_SCHEMA_VERSION, *LEGACY_CACHE_SCHEMA_VERSIONS)
+        metadata_paths = sorted(
+            {
+                path
+                for version in versions
+                for path in self.cache_dir.glob(f"{version}_{ticker}_*.json")
+            }
+        )
+        for metadata_path in metadata_paths:
             try:
-                cache_start, cache_end, frame = self._read_cache_entry(metadata_path)
+                cache_start, cache_end, frame, result = self._read_cache_entry(
+                    metadata_path
+                )
             except Exception as error:
                 self._record_cache_issue(metadata_path, error)
+                if metadata_path.name.startswith(f"{CACHE_SCHEMA_VERSION}_"):
+                    try:
+                        invalid_metadata = json.loads(
+                            metadata_path.read_text(encoding="utf-8")
+                        )
+                        if str(invalid_metadata.get("ticker", "")).upper() == ticker:
+                            blocked_current_ranges.append(
+                                (
+                                    date.fromisoformat(
+                                        str(invalid_metadata["start_date"])
+                                    ),
+                                    date.fromisoformat(str(invalid_metadata["end_date"])),
+                                )
+                            )
+                    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                        pass
                 continue
             if cache_end < start or cache_start > end:
                 continue
-            entries.append((cache_start, cache_end, frame))
+            version_priority = (
+                0
+                if metadata_path.name.startswith(f"{CACHE_SCHEMA_VERSION}_")
+                else 1
+            )
+            entries.append(
+                (cache_start, cache_end, version_priority, frame, result)
+            )
 
         if not entries:
-            return [], [(start, end)]
-        entries.sort(key=lambda item: (item[0], item[1]))
+            return [], [(start, end)], False
+        entries.sort(key=lambda item: (item[0], item[1], item[2]))
         frames: list[pd.DataFrame] = []
         gaps: list[tuple[date, date]] = []
         cursor = start
-        for cache_start, cache_end, frame in entries:
+        used_cache = False
+        for cache_start, cache_end, _, frame, result in entries:
+            if any(
+                blocked_start <= cache_end and blocked_end >= cache_start
+                for blocked_start, blocked_end in blocked_current_ranges
+            ):
+                continue
             covered_start = max(start, cache_start)
             covered_end = min(end, cache_end)
             if covered_end < cursor:
                 continue
             if covered_start > cursor:
                 gaps.append((cursor, covered_start - timedelta(days=1)))
-            frames.append(frame)
+            if not frame.empty:
+                frames.append(frame)
             self.stats.cache_hits += 1
+            used_cache = True
+            if result == NO_DATA_IN_RANGE:
+                self.stats.empty_range_cache_hits += 1
             self._log(
                 f"[ISYATIRIM][{ticker}][{covered_start.isoformat()}.."
                 f"{covered_end.isoformat()}] cache hit {self._timing_text()}"
@@ -867,26 +1080,53 @@ class IsYatirimClient:
                 break
         if cursor <= end:
             gaps.append((cursor, end))
-        return frames, gaps
+        return frames, gaps, used_cache
 
     def _read_cache_entry(
         self, metadata_path: Path
-    ) -> tuple[date, date, pd.DataFrame]:
+    ) -> tuple[date, date, pd.DataFrame, str]:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        if metadata.get("cache_schema_version") != CACHE_SCHEMA_VERSION:
+        version = str(metadata.get("cache_schema_version", ""))
+        if version not in {CACHE_SCHEMA_VERSION, *LEGACY_CACHE_SCHEMA_VERSIONS}:
             raise ValueError("cache schema version mismatch")
         required = {
             "ticker",
             "start_date",
             "end_date",
-            "columns",
-            "row_count",
-            "data_file",
-            "sha256",
         }
         missing = required.difference(metadata)
         if missing:
             raise ValueError(f"cache metadata fields missing: {sorted(missing)}")
+        if version == CACHE_SCHEMA_VERSION:
+            required_v2 = {
+                "fetch_timestamp",
+                "result",
+                "schema_validation",
+                "checksum",
+            }
+            missing_v2 = required_v2.difference(metadata)
+            if missing_v2:
+                raise ValueError(
+                    f"cache v2 metadata fields missing: {sorted(missing_v2)}"
+                )
+            if metadata["checksum"] != self._metadata_checksum(metadata):
+                raise ValueError("cache metadata checksum mismatch")
+            validation = metadata["schema_validation"]
+            if not isinstance(validation, dict) or validation.get("status") != "PASS":
+                raise ValueError("cache schema validation is not PASS")
+        cache_start = date.fromisoformat(str(metadata["start_date"]))
+        cache_end = date.fromisoformat(str(metadata["end_date"]))
+        if cache_start > cache_end:
+            raise ValueError("cache date range is reversed")
+        result = str(metadata.get("result", DATA_IN_RANGE))
+        if result == NO_DATA_IN_RANGE:
+            return cache_start, cache_end, pd.DataFrame(), result
+        if result != DATA_IN_RANGE:
+            raise ValueError(f"unsupported cache result: {result}")
+        data_required = {"columns", "row_count", "data_file", "sha256"}
+        data_missing = data_required.difference(metadata)
+        if data_missing:
+            raise ValueError(f"cache data fields missing: {sorted(data_missing)}")
         data_path = metadata_path.parent / str(metadata["data_file"])
         if not data_path.is_file():
             raise FileNotFoundError(f"cache data file missing: {data_path.name}")
@@ -903,9 +1143,25 @@ class IsYatirimClient:
         frame["HGDG_TARIH"] = pd.to_datetime(
             frame["HGDG_TARIH"], errors="raise"
         ).dt.normalize()
-        cache_start = date.fromisoformat(str(metadata["start_date"]))
-        cache_end = date.fromisoformat(str(metadata["end_date"]))
-        return cache_start, cache_end, frame
+        tickers = frame["HGDG_HS_KODU"].astype(str).str.upper().unique().tolist()
+        if tickers != [str(metadata["ticker"]).upper()]:
+            raise ValueError("cache ticker identity mismatch")
+        if not frame["HGDG_TARIH"].between(
+            pd.Timestamp(cache_start), pd.Timestamp(cache_end), inclusive="both"
+        ).all():
+            raise ValueError("cache contains dates outside metadata coverage")
+        return cache_start, cache_end, frame, result
+
+    @staticmethod
+    def _metadata_checksum(metadata: Mapping[str, Any]) -> str:
+        payload = {key: value for key, value in metadata.items() if key != "checksum"}
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     def _record_cache_issue(self, path: Path, error: Exception) -> None:
         key = str(path.resolve())

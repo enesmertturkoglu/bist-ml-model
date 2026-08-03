@@ -8,6 +8,7 @@ import os
 import re
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -28,8 +29,14 @@ from src.data.cleaning import summarize_cleaning
 from src.data.cleaning_pipeline import CleaningSnapshotSet, MarketDataCleaningPipeline
 from src.data.collectors import (
     MarketDataCollector,
+    PreparedTickerCollection,
     ProviderGap,
     SourceCollectionResult,
+)
+from src.data.isyatirim_client import (
+    CACHE_SCHEMA_VERSION,
+    GlobalRequestLimiter,
+    NO_DATA_IN_RANGE,
 )
 from src.data.label_pipeline import LabelGenerationPipeline
 from src.data.labels import summarize_labels
@@ -238,6 +245,9 @@ class ManifestOutcome:
     cache_hit_count: int = 0
     retry_count: int = 0
     timeout_count: int = 0
+    empty_range_count: int = 0
+    empty_range_cache_hit_count: int = 0
+    operational_hint_date: str = ""
 
     @property
     def complete(self) -> bool:
@@ -291,6 +301,9 @@ def manifest_outcome_to_dict(outcome: ManifestOutcome) -> dict[str, Any]:
         "cache_hit_count": outcome.cache_hit_count,
         "retry_count": outcome.retry_count,
         "timeout_count": outcome.timeout_count,
+        "empty_range_count": outcome.empty_range_count,
+        "empty_range_cache_hit_count": outcome.empty_range_cache_hit_count,
+        "operational_hint_date": outcome.operational_hint_date,
     }
 
 
@@ -338,7 +351,33 @@ def manifest_outcome_from_dict(value: Mapping[str, Any]) -> ManifestOutcome:
         cache_hit_count=int(float(value.get("cache_hit_count", 0))),
         retry_count=int(float(value.get("retry_count", 0))),
         timeout_count=int(float(value.get("timeout_count", 0))),
+        empty_range_count=int(float(value.get("empty_range_count", 0))),
+        empty_range_cache_hit_count=int(
+            float(value.get("empty_range_cache_hit_count", 0))
+        ),
+        operational_hint_date=str(value.get("operational_hint_date", "")),
     )
+
+
+@dataclass(frozen=True)
+class PreparedManifestRow:
+    row_number: int
+    row: Mapping[str, Any]
+    prepared: PreparedTickerCollection | None
+    error: Exception | None
+    collection_pass: int
+    security_position: int
+    security_started_at: float
+    security_budget_seconds: float
+    elapsed_seconds: float
+
+
+@dataclass(frozen=True)
+class PreparedSecurity:
+    security_id: str
+    security_position: int
+    security_started_at: float
+    rows: tuple[PreparedManifestRow, ...]
 
 
 @dataclass(frozen=True)
@@ -991,6 +1030,17 @@ class FullHistoryPipeline:
             monotonic_func=self.monotonic_func,
             progress_func=self.progress_func,
         )
+        if self.config.isyatirim_max_concurrency < 1:
+            raise FullHistoryError("isyatirim_max_concurrency must be at least one")
+        if self.config.global_request_interval_seconds < 0:
+            raise FullHistoryError(
+                "global_request_interval_seconds cannot be negative"
+            )
+        request_limiter = GlobalRequestLimiter(
+            max_concurrency=self.config.isyatirim_max_concurrency,
+            request_interval_seconds=self.config.global_request_interval_seconds,
+            monotonic_func=self.monotonic_func,
+        )
         total = self.context.master_security_count
         security_order = list(preflight.universe["security_id"].astype(str))
         manifest_groups = {
@@ -1031,6 +1081,8 @@ class FullHistoryPipeline:
                 f"attempted_security_count={restored_security_count} "
                 f"next_unattempted_position={restored_security_count + 1}/{total}"
             )
+        pending_first_pass: list[str] = []
+        first_eligible_rows: dict[str, tuple[int, ...]] = {}
         for position, security_id in enumerate(security_order, start=1):
             rows = manifest_groups[security_id]
             ticker = str(rows.iloc[0]["current_ticker"])
@@ -1045,27 +1097,35 @@ class FullHistoryPipeline:
                     f"security_id={security_id}"
                 )
                 continue
-            security_started_at = float(self.monotonic_func())
+            pending_first_pass.append(security_id)
+            first_eligible_rows[security_id] = row_numbers
             self._log(
-                f"[COLLECTION][PASS 1][{position}/{total}][{ticker}] başladı "
+                f"[COLLECTION][PASS 1][{position}/{total}][{ticker}] kuyruğa alındı "
                 f"security_id={security_id} budget_seconds="
                 f"{self.context.first_pass_security_budget_seconds:.0f}"
             )
-            for row_number, row in rows.iterrows():
-                outcome = self._collect_manifest_row(
-                    collector,
-                    int(row_number),
-                    row,
-                    collection_pass=1,
-                    security_position=position,
-                    security_started_at=security_started_at,
-                    security_budget_seconds=(
-                        self.context.first_pass_security_budget_seconds
-                    ),
-                    refresh=refresh,
-                )
-                outcomes_by_row[int(row_number)] = outcome
-                first_pass_by_row[int(row_number)] = outcome
+
+        for position, security_id, security_started_at, security_outcomes in (
+            self._collection_pass_results(
+                preflight,
+                collector,
+                request_limiter,
+                pending_first_pass,
+                security_order,
+                manifest_groups,
+                first_eligible_rows,
+                collection_pass=1,
+                security_budget_seconds=(
+                    self.context.first_pass_security_budget_seconds
+                ),
+                refresh=refresh,
+            )
+        ):
+            rows = manifest_groups[security_id]
+            ticker = str(rows.iloc[0]["current_ticker"])
+            for outcome in security_outcomes:
+                outcomes_by_row[outcome.row_number] = outcome
+                first_pass_by_row[outcome.row_number] = outcome
                 attempt_history.append(outcome)
             self._checkpoint_attempt_history = tuple(attempt_history)
             status = build_collection_status(
@@ -1123,46 +1183,55 @@ class FullHistoryPipeline:
         retry_pass_started = str(
             prior_passes.get("retry_pass_started_at_utc") or _utc_now()
         )
+        retry_eligible_rows: dict[str, tuple[int, ...]] = {}
+        actual_retry_ids: list[str] = []
         for security_id in retry_ids:
             position = security_order.index(security_id) + 1
             rows = manifest_groups[security_id]
             ticker = str(rows.iloc[0]["current_ticker"])
-            security_started_at = float(self.monotonic_func())
-            self._log(
-                f"[COLLECTION][PASS 2][{position}/{total}][{ticker}] başladı "
-                f"security_id={security_id} budget_seconds="
-                f"{self.context.retry_pass_security_budget_seconds:.0f}"
+            eligible = tuple(
+                int(row_number)
+                for row_number in rows.index
+                if not outcomes_by_row[int(row_number)].complete
+                and int(row_number) not in second_pass_by_row
             )
-            attempted_retry = False
-            for row_number, row in rows.iterrows():
-                previous = outcomes_by_row[int(row_number)]
-                if previous.complete:
-                    continue
-                if int(row_number) in second_pass_by_row:
-                    continue
-                outcome = self._collect_manifest_row(
-                    collector,
-                    int(row_number),
-                    row,
-                    collection_pass=2,
-                    security_position=position,
-                    security_started_at=security_started_at,
-                    security_budget_seconds=(
-                        self.context.retry_pass_security_budget_seconds
-                    ),
-                    refresh=False,
-                )
-                outcomes_by_row[int(row_number)] = outcome
-                second_pass_by_row[int(row_number)] = outcome
-                attempt_history.append(outcome)
-                attempted_retry = True
-            if not attempted_retry:
+            if not eligible:
                 self._log(
                     f"[COLLECTION][PASS 2][{position}/{total}][{ticker}] "
                     f"checkpoint hit; üçüncü deneme yapılmıyor "
                     f"security_id={security_id}"
                 )
                 continue
+            retry_eligible_rows[security_id] = eligible
+            actual_retry_ids.append(security_id)
+            self._log(
+                f"[COLLECTION][PASS 2][{position}/{total}][{ticker}] kuyruğa alındı "
+                f"security_id={security_id} budget_seconds="
+                f"{self.context.retry_pass_security_budget_seconds:.0f}"
+            )
+
+        for position, security_id, security_started_at, security_outcomes in (
+            self._collection_pass_results(
+                preflight,
+                collector,
+                request_limiter,
+                actual_retry_ids,
+                security_order,
+                manifest_groups,
+                retry_eligible_rows,
+                collection_pass=2,
+                security_budget_seconds=(
+                    self.context.retry_pass_security_budget_seconds
+                ),
+                refresh=False,
+            )
+        ):
+            rows = manifest_groups[security_id]
+            ticker = str(rows.iloc[0]["current_ticker"])
+            for outcome in security_outcomes:
+                outcomes_by_row[outcome.row_number] = outcome
+                second_pass_by_row[outcome.row_number] = outcome
+                attempt_history.append(outcome)
             self._checkpoint_attempt_history = tuple(attempt_history)
             status = build_collection_status(
                 preflight, tuple(outcomes_by_row.values())
@@ -1241,6 +1310,233 @@ class FullHistoryPipeline:
             ],
         }
         return outcomes, final_status, final_summary, collection_passes
+
+    def _effective_security_worker_count(self) -> int:
+        configured = int(self.config.security_worker_count)
+        if configured < 1:
+            raise FullHistoryError("security_worker_count must be at least one")
+        if self.collector is not None or "_collect_manifest_row" in self.__dict__:
+            return 1
+        return configured
+
+    def _new_worker_collector(
+        self,
+        preflight: FullHistoryPreflight,
+        request_limiter: GlobalRequestLimiter,
+    ) -> MarketDataCollector:
+        return MarketDataCollector(
+            self.config,
+            snapshot_store=self.snapshot_store,
+            ticker_mapping=preflight.mapping,
+            code_commit_sha=self.code_commit_sha,
+            monotonic_func=self.monotonic_func,
+            progress_func=self.progress_func,
+            request_limiter=request_limiter,
+        )
+
+    def _prepare_manifest_row(
+        self,
+        collector: MarketDataCollector,
+        row_number: int,
+        row: pd.Series,
+        *,
+        collection_pass: int,
+        security_position: int,
+        security_started_at: float,
+        security_budget_seconds: float,
+        refresh: bool,
+    ) -> PreparedManifestRow:
+        start = date.fromisoformat(str(row["period_start"]))
+        end = date.fromisoformat(str(row["period_end"]))
+        try:
+            prepared = collector.prepare_ticker(
+                str(row["provider_ticker"]),
+                start,
+                end,
+                refresh=refresh,
+                isyatirim_security_budget_seconds=security_budget_seconds,
+                isyatirim_security_started_at=security_started_at,
+                collection_pass=collection_pass,
+                security_id=str(row["security_id"]),
+                manifest_position=security_position,
+                manifest_total=self.context.master_security_count,
+            )
+            error = None
+        except Exception as exc:
+            prepared = None
+            error = exc
+        return PreparedManifestRow(
+            row_number=row_number,
+            row={str(key): value for key, value in row.items()},
+            prepared=prepared,
+            error=error,
+            collection_pass=collection_pass,
+            security_position=security_position,
+            security_started_at=security_started_at,
+            security_budget_seconds=security_budget_seconds,
+            elapsed_seconds=float(self.monotonic_func()) - security_started_at,
+        )
+
+    def _prepare_security(
+        self,
+        preflight: FullHistoryPreflight,
+        request_limiter: GlobalRequestLimiter,
+        security_id: str,
+        security_position: int,
+        rows: pd.DataFrame,
+        *,
+        collection_pass: int,
+        security_budget_seconds: float,
+        refresh: bool,
+    ) -> PreparedSecurity:
+        collector = self._new_worker_collector(preflight, request_limiter)
+        security_started_at = float(self.monotonic_func())
+        prepared_rows = tuple(
+            self._prepare_manifest_row(
+                collector,
+                int(row_number),
+                row,
+                collection_pass=collection_pass,
+                security_position=security_position,
+                security_started_at=security_started_at,
+                security_budget_seconds=security_budget_seconds,
+                refresh=refresh,
+            )
+            for row_number, row in rows.iterrows()
+        )
+        return PreparedSecurity(
+            security_id=security_id,
+            security_position=security_position,
+            security_started_at=security_started_at,
+            rows=prepared_rows,
+        )
+
+    def _commit_prepared_manifest_row(
+        self,
+        writer: MarketDataCollector,
+        prepared_row: PreparedManifestRow,
+    ) -> ManifestOutcome:
+        row = pd.Series(dict(prepared_row.row))
+        start = date.fromisoformat(str(row["period_start"]))
+        end = date.fromisoformat(str(row["period_end"]))
+        try:
+            if prepared_row.error is not None:
+                raise prepared_row.error
+            assert prepared_row.prepared is not None
+            result = writer.commit_prepared_ticker(prepared_row.prepared)
+            return self._manifest_outcome(
+                prepared_row.row_number,
+                row,
+                result.source_results,
+                collection_pass=prepared_row.collection_pass,
+                elapsed_seconds=prepared_row.elapsed_seconds,
+                security_budget_seconds=prepared_row.security_budget_seconds,
+            )
+        except Exception as exc:
+            gap = ProviderGap(
+                start_date=start.isoformat(),
+                end_date=end.isoformat(),
+                failure_class=type(exc).__name__,
+                failure_reason=sanitize_error(exc),
+                retry_recommended=True,
+            )
+            return ManifestOutcome(
+                row_number=prepared_row.row_number,
+                security_id=str(row["security_id"]),
+                current_ticker=str(row["current_ticker"]),
+                provider_ticker=str(row["provider_ticker"]),
+                period_start=start.isoformat(),
+                period_end=end.isoformat(),
+                isyatirim_status="FAILED",
+                yfinance_status="FAILED",
+                nominal_status="FAILED",
+                isyatirim_raw_snapshot_id="",
+                yfinance_raw_snapshot_id="",
+                nominal_snapshot_id="",
+                failure_stage="COLLECTION_ORCHESTRATION",
+                failure_class=type(exc).__name__,
+                failure_reason=sanitize_error(exc),
+                collection_pass=prepared_row.collection_pass,
+                gaps=(("COLLECTION_ORCHESTRATION", gap),),
+                retry_recommended=True,
+                elapsed_seconds=prepared_row.elapsed_seconds,
+                security_budget_seconds=prepared_row.security_budget_seconds,
+            )
+
+    def _collection_pass_results(
+        self,
+        preflight: FullHistoryPreflight,
+        writer: MarketDataCollector,
+        request_limiter: GlobalRequestLimiter,
+        security_ids: Sequence[str],
+        security_order: Sequence[str],
+        manifest_groups: Mapping[str, pd.DataFrame],
+        eligible_rows: Mapping[str, Sequence[int]],
+        *,
+        collection_pass: int,
+        security_budget_seconds: float,
+        refresh: bool,
+    ) -> Iterable[tuple[int, str, float, tuple[ManifestOutcome, ...]]]:
+        worker_count = self._effective_security_worker_count()
+        if worker_count == 1:
+            for security_id in security_ids:
+                position = security_order.index(security_id) + 1
+                rows = manifest_groups[security_id].loc[list(eligible_rows[security_id])]
+                security_started_at = float(self.monotonic_func())
+                outcomes = tuple(
+                    self._collect_manifest_row(
+                        writer,
+                        int(row_number),
+                        row,
+                        collection_pass=collection_pass,
+                        security_position=position,
+                        security_started_at=security_started_at,
+                        security_budget_seconds=security_budget_seconds,
+                        refresh=refresh,
+                    )
+                    for row_number, row in rows.iterrows()
+                )
+                yield position, security_id, security_started_at, outcomes
+            return
+
+        with ThreadPoolExecutor(
+            max_workers=worker_count, thread_name_prefix="history-security"
+        ) as executor:
+            for offset in range(0, len(security_ids), worker_count):
+                batch = list(security_ids[offset : offset + worker_count])
+                futures = []
+                for security_id in batch:
+                    position = security_order.index(security_id) + 1
+                    rows = manifest_groups[security_id].loc[
+                        list(eligible_rows[security_id])
+                    ]
+                    futures.append(
+                        executor.submit(
+                            self._prepare_security,
+                            preflight,
+                            request_limiter,
+                            security_id,
+                            position,
+                            rows,
+                            collection_pass=collection_pass,
+                            security_budget_seconds=security_budget_seconds,
+                            refresh=refresh,
+                        )
+                    )
+                # Results and commits follow manifest/security order even when
+                # provider completion order differs.
+                for future in futures:
+                    prepared = future.result()
+                    outcomes = tuple(
+                        self._commit_prepared_manifest_row(writer, item)
+                        for item in prepared.rows
+                    )
+                    yield (
+                        prepared.security_position,
+                        prepared.security_id,
+                        prepared.security_started_at,
+                        outcomes,
+                    )
 
     def _collect_manifest_row(
         self,
@@ -1338,12 +1634,20 @@ class FullHistoryPipeline:
                 "cache_hit_count",
                 "retry_count",
                 "timeout_count",
+                "empty_range_count",
+                "empty_range_cache_hit_count",
             )
         }
         last_successful_stage = ""
-        if isyatirim.raw_snapshot.snapshot_status is SnapshotStatus.COMPLETE:
+        if (
+            isyatirim.raw_snapshot is not None
+            and isyatirim.raw_snapshot.snapshot_status is SnapshotStatus.COMPLETE
+        ):
             last_successful_stage = "ISYATIRIM_RAW"
-        if yfinance.raw_snapshot.snapshot_status is SnapshotStatus.COMPLETE:
+        if (
+            yfinance.raw_snapshot is not None
+            and yfinance.raw_snapshot.snapshot_status is SnapshotStatus.COMPLETE
+        ):
             last_successful_stage = "YFINANCE_RAW"
         if nominal is not None and nominal.snapshot_status is SnapshotStatus.COMPLETE:
             last_successful_stage = "YFINANCE_NOMINAL"
@@ -1354,19 +1658,37 @@ class FullHistoryPipeline:
             provider_ticker=str(row["provider_ticker"]),
             period_start=str(row["period_start"]),
             period_end=str(row["period_end"]),
-            isyatirim_status=isyatirim.raw_snapshot.snapshot_status.value,
-            yfinance_status=yfinance.raw_snapshot.snapshot_status.value,
+            isyatirim_status=(
+                isyatirim.raw_snapshot.snapshot_status.value
+                if isyatirim.raw_snapshot is not None
+                else isyatirim.result
+            ),
+            yfinance_status=(
+                yfinance.raw_snapshot.snapshot_status.value
+                if yfinance.raw_snapshot is not None
+                else yfinance.result
+            ),
             nominal_status=(
                 nominal.snapshot_status.value if nominal is not None else "FAILED"
             ),
-            isyatirim_raw_snapshot_id=isyatirim.raw_snapshot.snapshot_id,
-            yfinance_raw_snapshot_id=yfinance.raw_snapshot.snapshot_id,
+            isyatirim_raw_snapshot_id=(
+                isyatirim.raw_snapshot.snapshot_id
+                if isyatirim.raw_snapshot is not None
+                else ""
+            ),
+            yfinance_raw_snapshot_id=(
+                yfinance.raw_snapshot.snapshot_id
+                if yfinance.raw_snapshot is not None
+                else ""
+            ),
             nominal_snapshot_id=(
                 nominal.snapshot_id
                 if nominal is not None and self.snapshot_store.is_usable(nominal)
                 else ""
             ),
-            isyatirim_dates=self._observed_dates(isyatirim.raw_snapshot, "HGDG_TARIH"),
+            isyatirim_dates=self._observed_dates(
+                isyatirim.raw_snapshot, "HGDG_TARIH"
+            ),
             yfinance_dates=self._observed_dates(yfinance.raw_snapshot, "date"),
             failure_stage=(last_failure.source.upper() if last_failure else ""),
             failure_class=(last_failure.failure_class or "" if last_failure else ""),
@@ -1385,11 +1707,16 @@ class FullHistoryPipeline:
             cache_hit_count=metrics["cache_hit_count"],
             retry_count=metrics["retry_count"],
             timeout_count=metrics["timeout_count"],
+            empty_range_count=metrics["empty_range_count"],
+            empty_range_cache_hit_count=metrics["empty_range_cache_hit_count"],
+            operational_hint_date=isyatirim.operational_hint_date,
         )
 
     def _observed_dates(
-        self, metadata: SnapshotMetadata, column: str
+        self, metadata: SnapshotMetadata | None, column: str
     ) -> tuple[str, ...]:
+        if metadata is None:
+            return ()
         if not self.snapshot_store.is_usable(metadata):
             return ()
         frame = self.snapshot_store.read_dataframe(metadata)
@@ -1479,6 +1806,21 @@ class FullHistoryPipeline:
             "mapping_checksum": preflight.mapping.checksum,
             "mapping_file_checksum": preflight.mapping_file_checksum,
             "collection_summary": dict(summary),
+            "collection_configuration": {
+                "security_worker_count": self.config.security_worker_count,
+                "isyatirim_max_concurrency": self.config.isyatirim_max_concurrency,
+                "global_request_interval_seconds": (
+                    self.config.global_request_interval_seconds
+                ),
+                "single_writer_coordinator": True,
+                "deterministic_commit_order": "manifest_security_order",
+                "empty_range_result": NO_DATA_IN_RANGE,
+                "empty_range_cache_schema_version": CACHE_SCHEMA_VERSION,
+                "legacy_cache_migration": "v1 non-empty entries remain readable; no files deleted",
+                "yfinance_first_observation_optimization": (
+                    "operational request-order hint only; no date coverage is skipped"
+                ),
+            },
             "collection_passes": dict(collection_passes or {}),
             "used_security_ids": sorted(map(str, used_security_ids)),
             "excluded_security_ids": sorted(map(str, excluded_security_ids)),
@@ -1869,7 +2211,7 @@ def build_collection_status(
     }
     current_by_security = preflight.universe.set_index("security_id")["current_ticker"]
     rows: list[dict[str, Any]] = []
-    for security_id in sorted(map(str, preflight.universe["security_id"])):
+    for security_id in map(str, preflight.universe["security_id"]):
         planned = manifest_by_security[security_id]
         completed = sorted(
             outcome_by_security.get(security_id, []), key=lambda item: item.row_number
@@ -2489,6 +2831,10 @@ def build_prediction_reports(
 def _aggregate_provider_status(values: Sequence[str], expected_count: int) -> str:
     if not values:
         return "PENDING"
+    if len(values) == expected_count and all(
+        value == NO_DATA_IN_RANGE for value in values
+    ):
+        return NO_DATA_IN_RANGE
     if len(values) == expected_count and all(value == "COMPLETE" for value in values):
         return "COMPLETE"
     if any(value == "COMPLETE" for value in values):

@@ -8,7 +8,11 @@ import pandas as pd
 
 from src.config import MarketDataConfig, SnapshotStatus
 from src.data.collectors import MarketDataCollector
-from src.data.isyatirim_client import IsYatirimFetchError, RequestFailure
+from src.data.isyatirim_client import (
+    NO_DATA_IN_RANGE,
+    IsYatirimFetchError,
+    RequestFailure,
+)
 from src.data.snapshot_store import SnapshotStore
 
 
@@ -277,3 +281,49 @@ def test_missing_required_provider_field_is_recorded_as_partial(tmp_path: Path) 
     assert "Stock Splits" in (result.raw_snapshot.error_message or "")
     assert result.derived_snapshots == ()
     assert not store.is_usable(result.raw_snapshot)
+
+
+def test_verified_empty_isyatirim_range_is_not_a_failed_training_snapshot(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, yfinance_retries=1)
+    store = SnapshotStore(config)
+    collector = MarketDataCollector(
+        config,
+        snapshot_store=store,
+        isyatirim_client=FakeIsYatirimClient(pd.DataFrame()),
+        yfinance_fetcher=lambda *_: _yfinance_frame(),
+        sleep_func=lambda _: None,
+        code_commit_sha="g" * 40,
+    )
+
+    result = collector.collect_ticker("AAA", date(2024, 1, 1), date(2024, 1, 2))
+
+    isyatirim, yfinance = result.source_results
+    assert isyatirim.result == NO_DATA_IN_RANGE
+    assert isyatirim.raw_snapshot is None
+    assert yfinance.complete
+    assert len(store.load_manifest()) == 2
+
+
+def test_prepare_worker_does_not_write_shared_snapshot_manifest(tmp_path: Path) -> None:
+    config = _config(tmp_path, yfinance_retries=1)
+    store = SnapshotStore(config)
+    collector = MarketDataCollector(
+        config,
+        snapshot_store=store,
+        isyatirim_client=FakeIsYatirimClient(_isyatirim_frame()),
+        yfinance_fetcher=lambda *_: _yfinance_frame(),
+        sleep_func=lambda _: None,
+        code_commit_sha="h" * 40,
+    )
+
+    prepared = collector.prepare_ticker(
+        "AAA", date(2024, 1, 1), date(2024, 1, 2)
+    )
+
+    assert store.load_manifest() == []
+    assert not config.snapshot_manifest_path.exists()
+    committed = collector.commit_prepared_ticker(prepared)
+    assert committed.complete
+    assert len(store.load_manifest()) == 3

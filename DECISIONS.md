@@ -937,6 +937,28 @@ Tek bir yavaş veya sorunlu ticker'ın tüm üretim koşusunu saatlerce durdurma
 
 2026-07-31
 
+### D036 — Empty-Range Sınıflandırması ve Kontrollü Paralel Collection
+
+**Karar:**
+
+İş Yatırım'ın HTTP 200, JSON object, mevcut ve list tipindeki `value=[]` cevabı `NO_DATA_IN_RANGE` olarak sınıflandırılacaktır. Bu sonuç retry veya adaptive `12→6→3` split üretmez. Doğrulanmış boş aralık; ticker, başlangıç/bitiş tarihi, sonuç, fetch timestamp, schema-validation sonucu, cache schema version ve checksum ile kalıcı operational coverage cache'ine yazılır. Empty-range cache training snapshot'ı değildir; `FAILED` veya `CORRUPT` snapshot sayılmaz. Resume doğrulanmış boş kapsamı yeniden sorgulamaz, `--refresh` sorgular; bozuk cache fail-closed biçimde yeniden istenir. Eski v1 dolu cache kayıtları silinmeden okunmaya devam eder.
+
+Security düzeyi varsayılan worker sayısı `3`, process-geneli İş Yatırım eşzamanlı request üst sınırı `2` ve request başlangıçları için merkezi global interval kullanılır. Worker'lar yalnız provider sorgusu, parsing, DataFrame hazırlığı ve telemetri/hata sonucu üretir. Snapshot manifest/revision ile collection status/summary/outcome/gap/failure/provenance dosyalarına yalnız coordinator yazar.
+
+Coordinator sonuçları worker completion sırasıyla değil bağlayıcı manifest/security sırasıyla commit eder. Aynı security aynı pass içinde tek task olur; yalnız coordinator tarafından snapshot ve row-level outcome checkpoint'i tamamlanan sonuç resume edilmiş sayılır. First pass tüm security'ler için bitmeden retry pass başlayamaz ve üçüncü otomatik pass yoktur.
+
+**Gerekçe:**
+
+Geçerli boş dönemleri transient hata saymak yeni halka arzlarda kontrolsüz retry/split patlaması ve security bütçesi kaybı yaratıyordu. Sınırlı paralellik provider yükünü bounded tutarken tek-yazarlı, manifest-sıralı commit modeli immutable snapshot revision'larını ve processler arası resume determinismini korur.
+
+**Etkilenen alanlar:**
+
+İş Yatırım boş-response sınıflandırması ve operational cache, security worker sayısı, process-geneli provider concurrency/rate limit, tek-writer snapshot/checkpoint modeli ve deterministik resume.
+
+**Tarih:**
+
+2026-08-03
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

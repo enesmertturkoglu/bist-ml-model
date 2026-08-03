@@ -108,6 +108,25 @@ def parse_args() -> argparse.Namespace:
             "İş Yatırım retry chain in pass 2 (default: 1800)"
         ),
     )
+    defaults = MarketDataConfig()
+    parser.add_argument(
+        "--security-workers",
+        type=int,
+        default=defaults.security_worker_count,
+        help="Security-level fetch workers (default: 3; safe fallback: 1)",
+    )
+    parser.add_argument(
+        "--isyatirim-max-concurrency",
+        type=int,
+        default=defaults.isyatirim_max_concurrency,
+        help="Process-wide concurrent İş Yatırım request ceiling (default: 2)",
+    )
+    parser.add_argument(
+        "--global-request-interval-seconds",
+        type=float,
+        default=defaults.global_request_interval_seconds,
+        help="Minimum process-wide interval between İş Yatırım request starts",
+    )
     return parser.parse_args()
 
 
@@ -135,7 +154,13 @@ def main() -> int:
         price_steps=args.price_steps,
         report_root=args.report_root,
     )
-    config = replace(MarketDataConfig(), data_root=args.data_root)
+    config = replace(
+        MarketDataConfig(),
+        data_root=args.data_root,
+        security_worker_count=args.security_workers,
+        isyatirim_max_concurrency=args.isyatirim_max_concurrency,
+        global_request_interval_seconds=args.global_request_interval_seconds,
+    )
     store = SnapshotStore(config)
     pipeline = FullHistoryPipeline(
         config, context=context, paths=paths, snapshot_store=store

@@ -75,7 +75,9 @@ Her eski/güncel ticker için iki raw snapshot seçeneği tekrarlanır. Komut ya
 Dondurulmuş V1 bağlamının tek orchestration komutu:
 
 ```powershell
-python -u scripts/run_full_history_pipeline.py
+python -u scripts/run_full_history_pipeline.py `
+  --security-workers 3 `
+  --isyatirim-max-concurrency 2
 ```
 
 Komut varsayılan olarak aşağıdaki değerleri fail-closed doğrular ve değiştirmez:
@@ -89,9 +91,16 @@ collection_start_date = 2020-03-13
 collection_end_date = 2026-07-29
 first_pass_security_budget_seconds = 1200
 retry_pass_security_budget_seconds = 1800
+security_worker_count = 3
+isyatirim_max_concurrency = 2
+global_request_interval_seconds = 1.0
 ```
 
-Birinci tur bütün master securities'i sıralı işler. İş Yatırım için security-geneli bütçe bütün recursive `12→6→3` aylık chunk ve beş retry zincirini kapsar; her alt chunkta sıfırlanmaz. Bütçe dolduğunda yeni request/retry başlamaz ve `TIME_BUDGET_EXCEEDED` kaydedilir; devam eden request kendi timeout sınırına kadar tamamlanabilir. İş Yatırım başarısız olsa bile yFinance çalışır. Her security sonrasında `reports/full_history/collection_status.csv`, `collection_summary.json`, `run_provenance.json`, `collection_gaps.csv` ve `collection_failures.csv` atomik dosya değişimiyle yenilenir.
+Birinci tur bütün master securities'i manifest sırasında tek task olarak kuyruğa alır. Üç worker yalnız provider sorgusu, parsing, DataFrame hazırlığı ve telemetri/hata sonucu üretir. İş Yatırım için security-geneli bütçe gerçek transient hatalardaki recursive `12→6→3` aylık chunk ve bounded retry zincirini kapsar; her alt chunkta sıfırlanmaz. HTTP 200, JSON object ve list tipindeki boş `value` doğrudan `NO_DATA_IN_RANGE` olur; retry/split/bütçe patlaması üretmez ve doğrulanmış coverage cache'ine yazılır. İş Yatırım başarısız olsa bile yFinance çalışır.
+
+Process genelindeki semaphore eşzamanlı İş Yatırım request sayısını `2` ile sınırlar ve global request interval worker'lar arasında ortaktır. Worker snapshot manifest/revision veya full-history raporlarına yazmaz. Tek coordinator sonuçları completion sırasından bağımsız olarak manifest/security sırasında snapshot'a ve `reports/full_history/collection_status.csv`, `collection_summary.json`, `run_provenance.json`, `collection_gaps.csv`, `collection_failures.csv`, `collection_outcomes.json` checkpoint'lerine atomik olarak yazar.
+
+yFinance ilk gözlem tarihi yalnız İş Yatırım'da o tarihin çevresindeki yıllık aralığı önce doğrulamak için request-order hint'idir. Önceki dönemlerin hiçbiri atlanmaz; doğrulanmış boş cevaplar tek tek `NO_DATA_IN_RANGE` coverage olur. Provider başlangıçları açıklanamayacak ölçüde farklıysa mevcut `ticker_mapping_review.csv` akışı resmî kanıt ister; mapping CSV otomatik değiştirilmez.
 
 Satır düzeyi resume kaydı ayrıca `reports/full_history/collection_outcomes.json` içinde latest manifest outcome ve first/retry attempt history olarak atomik tutulur. Yeniden başlatılan process, status/summary/provenance bağlamını aktif evren, manifest ve mapping checksum'larıyla fail-closed doğrular; COMPLETE snapshot'ların fiziksel kullanılabilirliğini tekrar kontrol eder ve first pass'te ilk `UNATTEMPTED` security'den devam eder. Retry sonucu checkpoint edilmiş satıra üçüncü otomatik provider denemesi yapılmaz.
 
@@ -103,7 +112,7 @@ python -u scripts/run_full_history_pipeline.py `
   --retry-pass-security-budget-seconds 1800
 ```
 
-Kesilmiş koşuda aynı komut yeniden çalıştırılır; fiziksel bütünlükten geçen `COMPLETE` raw/nominal snapshot'lar provider'a yeniden sorulmaz ve başarılı chunk cache'leri korunur. Başarılı snapshot'ı bilinçli yeniden indirmek için yalnız birinci turda açıkça `--refresh` gerekir; ikinci tur doğrulanmış başarıları hiçbir koşulda yenilemez.
+Kesilmiş koşuda aynı komut yeniden çalıştırılır; fiziksel bütünlükten geçen `COMPLETE` raw/nominal snapshot'lar provider'a yeniden sorulmaz ve başarılı dolu/boş cache coverage'ı korunur. Worker fetch'i bitmiş fakat coordinator commit'i tamamlanmamış security yeniden denenebilir ve başarılı checkpoint sayılmaz. Başarılı snapshot veya empty-range coverage'ı bilinçli yeniden indirmek için yalnız birinci turda açıkça `--refresh` gerekir; ikinci tur doğrulanmış başarıları hiçbir koşulda yenilemez. Eski v1 dolu cache kayıtları geriye uyumlu okunur ve sessizce silinmez.
 
 Yalnız preflight çalıştırmak için:
 
@@ -111,7 +120,7 @@ Yalnız preflight çalıştırmak için:
 python scripts/run_full_history_pipeline.py --preflight-only
 ```
 
-Üretim komutu security/provider düzeyinde sıralıdır; paralel/agresif provider isteği veya sessiz veri kaynağı fallback'i yoktur. İki tur bitmeden derived zincir başlamaz ve bitmiş collection'da bütün 621 securities `COMPLETE/PARTIAL/FAILED/NO_HISTORY` sınıflarından birindedir. Derived zincire yalnız checksum doğrulamasından geçen `COMPLETE` securities girer; kapsam 621'den küçükse `experiment_ready=false` kalır.
+Üretim komutu security düzeyinde kontrollü paraleldir; İş Yatırım process-geneli concurrency sınırı `2`dir ve sessiz veri kaynağı fallback'i yoktur. First pass bütün securities için bitmeden retry pass başlamaz; aynı security aynı pass içinde iki worker'a verilmez ve üçüncü otomatik pass yoktur. İki tur bitmeden derived zincir başlamaz ve bitmiş collection'da bütün 621 securities `COMPLETE/PARTIAL/FAILED/NO_HISTORY` sınıflarından birindedir. Derived zincire yalnız checksum doğrulamasından geçen `COMPLETE` securities girer; kapsam 621'den küçükse `experiment_ready=false` kalır.
 
 Tam collection tamamlanmadan identity/clean/label/XU100/feature/prediction/fold raporları tam sayılmaz. `ticker_mapping_review.csv` sinyalleri otomatik alias değildir; `NO_HISTORICAL_TICKER_FOUND` da “ticker hiç değişmedi” doğrulaması değildir. Açıklanamayan boşluklar için KAP/Borsa İstanbul kanıtı ayrı incelenir.
 

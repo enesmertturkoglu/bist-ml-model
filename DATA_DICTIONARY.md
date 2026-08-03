@@ -503,6 +503,22 @@ Daily Precision@K tarih satırı `requested_k`, `effective_k`, `selected_count`,
 
 `models/lightgbm/<experiment_id>/metadata.json` ve fold metadata'sı model/fold sürümü, UTC eğitim zamanı, as-of/dönem sınırları, son kullanılabilir label tarihi, feature/label snapshot ID ve checksum'ları, aktif evren snapshot ID/checksum/sürüm/as-of alanları, feature katalog checksum'u, sıralı 32 feature, effective LightGBM parametreleri, random seed, kod commit SHA, satır/sınıf oranları, fold tanımları, train/validation/OOS metrikleri ve `training_fingerprint` alanlarını saklar. Fingerprint kod SHA + config checksum + feature/label snapshot checksum'ları + aktif evren kimliği/checksum/sürüm/as-of + katalog checksum + fold tanımları + seed bağlamıdır. Artifact klasörü atomik ve değişmezdir; aynı tamamlanmış fingerprint mevcut experiment'ı döndürür.
 
+## D036 İş Yatırım Empty-Range Coverage Cache Alanları
+
+`.cache/market_data/isyatirim/v2_<TICKER>_<START>_<END>.json`, HTTP 200 ve doğrulanmış `value=[]` cevabının operational coverage kaydıdır. Raw/training snapshot değildir; snapshot manifest veya revision log'a girmez ve `FAILED/CORRUPT` snapshot sayılmaz.
+
+| Alan | Anlam | Doğrulama/kullanım |
+| --- | --- | --- |
+| `ticker` | Gerçekte sorgulanan provider ticker | Resume request kimliği; otomatik alias değildir |
+| `start_date`, `end_date` | Inclusive doğrulanmış boş tarih aralığı | Coverage overlap/gap hesabına katılır; alt 6/3 aylık split üretilmez |
+| `result` | Sabit `NO_DATA_IN_RANGE` | Retry veya security failure değildir |
+| `fetch_timestamp` | Provider cevabının UTC alım zamanı | Audit/provenance; model feature'ı değildir |
+| `schema_validation` | HTTP/JSON/value sözleşmesinin `PASS` ayrıntıları | `value` mevcut, list ve boş olmalıdır |
+| `cache_schema_version` | `v2` | Eski `v1` dolu kayıtlar geriye uyumlu okunur; silinmez |
+| `checksum` | `checksum` alanı hariç canonical metadata SHA-256 | Uyuşmazlıkta cache kullanılmaz ve aralık yeniden sorgulanır |
+
+Dolu v2 cache kaydı ayrıca `result=DATA_IN_RANGE`, column/row count, data filename ve data SHA-256 taşır. Empty-range kaydının CSV/data dosyası yoktur. `--refresh` cache coverage'ını bypass eder. Provider dolu cevap verip bütün tarihler istenen aralığın dışında kalırsa empty sayılmaz; kalıcı schema/date consistency hatasıdır.
+
 ## Tam Tarihsel Zincir Operasyon ve Feasibility Raporları
 
 `reports/full_history/collection_status.csv` her master security için tek satır taşır. Provider dönemleri birden fazlaysa ID/ticker alanları `|` ile sıralı birleştirilir; ayrıntılı dönemler bağlayıcı manifestte kalır.
@@ -512,7 +528,7 @@ Daily Precision@K tarih satırı `requested_k`, `effective_k`, `selected_count`,
 | `security_id`, `current_ticker` | D034 master kimliği ve as-of ticker |
 | `provider_tickers_queried` | Tamamlanan manifest satırlarında sorgulanan gerçek provider ticker'ları |
 | `requested_start_date`, `requested_end_date` | Security'nin bağlayıcı manifest kapsamı |
-| `isyatirim_status`, `yfinance_status`, `nominal_status` | Security dönemlerinin ayrı İş Yatırım raw, yFinance raw ve yFinance nominal toplu `PENDING/COMPLETE/PARTIAL/FAILED` durumu |
+| `isyatirim_status`, `yfinance_status`, `nominal_status` | Security dönemlerinin ayrı provider durumu; İş Yatırım tam boş coverage için ayrıca `NO_DATA_IN_RANGE`, diğer sonuçlarda `PENDING/COMPLETE/PARTIAL/FAILED` |
 | `status` | İki tur sonundaki security sınıfı: `COMPLETE`, `PARTIAL`, `FAILED`, `NO_HISTORY`; bitmiş koşuda `PENDING/UNATTEMPTED` kalamaz |
 | `raw_snapshot_ids`, `nominal_snapshot_id` | Fiziksel olarak doğrulanmış değişmez kaynak/nominal ID'leri |
 | `identity_snapshot_id`, `clean_snapshot_id`, `label_snapshot_id` | Derived zincir tamamlandıysa security kapsamını taşıyan batch snapshot'ları |
@@ -527,9 +543,9 @@ Daily Precision@K tarih satırı `requested_k`, `effective_k`, `selected_count`,
 
 `collection_gaps.csv`, her unresolved provider/tarih aralığını ayrı satırda `security_id`, ticker, provider, collection pass, durum, eksik başlangıç/bitiş, failure stage/class/reason, son başarılı aşama, retry önerisi, elapsed/budget ve request/cache/retry/timeout sayaçlarıyla taşır. Bütçe kesintisinde hem aktif hata aralığı hem de henüz request başlatılmamış sonraki aralıklar `TIME_BUDGET_EXCEEDED` olarak eksiksiz yazılır; doğrulanmış cache kapsamı gap sayılmaz. `collection_failures.csv` tamamen başarısız veya `NO_HISTORY` securities'i partial aralıklardan ayırır. `ticker_mapping_review.csv` açıklanamayan seri başlangıcı/bitişi/iç boşlukları için `OFFICIAL_EVIDENCE_REQUIRED` üretir; alias önermez.
 
-`collection_outcomes.json`, processler arası gerçek resume için `full_history_manifest_outcomes_v1` şemasını kullanır. Bağlam alanları aktif evren snapshot ID, manifest checksum ve mapping checksum'dur. `latest_outcomes` her manifest satırının son sonucunu; `attempt_history` ise first/retry pass geçmişini, provider durumlarını, snapshot ID'lerini, gerçek gap aralıklarını, hata/telemetri alanlarını ve collection pass numarasını saklar. Dosya her security checkpoint'inde atomik değiştirilir. Eski status/summary/provenance checkpoint'i yalnız tek manifest dönemli security satırlarında fail-closed doğrulamayla bu şemaya migrate edilebilir; COMPLETE olarak geri yüklenen her snapshot fiziksel checksum kontrolünden geçmelidir.
+`collection_outcomes.json`, processler arası gerçek resume için `full_history_manifest_outcomes_v1` şemasını kullanır. Bağlam alanları aktif evren snapshot ID, manifest checksum ve mapping checksum'dur. `latest_outcomes` her manifest satırının son sonucunu; `attempt_history` ise first/retry pass geçmişini, provider durumlarını, snapshot ID'lerini, gerçek gap aralıklarını, hata/telemetri alanlarını ve collection pass numarasını saklar. D036 sonuçları ayrıca `empty_range_count`, `empty_range_cache_hit_count` ve yalnız operasyonel `operational_hint_date` taşıyabilir. Dosya her coordinator security commit'inde atomik değiştirilir. Eski status/summary/provenance checkpoint'i yalnız tek manifest dönemli security satırlarında fail-closed doğrulamayla bu şemaya migrate edilebilir; COMPLETE olarak geri yüklenen her snapshot fiziksel checksum kontrolünden geçmelidir.
 
-`collection_summary.json` master/attempted/complete/partial/failed/no-history/unattempted sayılarını; İş Yatırım raw, yFinance raw ve nominal başarı oranlarını; first-pass complete, retry attempted/recovered ve retry sonrası remaining partial/failed sayaçlarını verir. Provider oranlarının denominator'ı `attempted_security_count` olup `PENDING/UNATTEMPTED` securities dahil edilmez. `run_provenance.json`; iki turun başlangıç/bitiş zamanlarını, `1200/1800` varsayılan veya CLI ile verilen bütçeleri, first-pass sonucunu, retry/recovered/remaining listelerini, hata geçmişini, kullanılan/dışlanan security listelerini ve her snapshot için ID/checksum/input IDs/row count/status/source/layer/used-security-count alanlarını taşır. `PARTIAL`, kesilmiş veya derived zinciri tamamlanmamış koşu `experiment_ready=false` kalır.
+`collection_summary.json` master/attempted/complete/partial/failed/no-history/unattempted sayılarını; İş Yatırım raw, yFinance raw ve nominal başarı oranlarını; first-pass complete, retry attempted/recovered ve retry sonrası remaining partial/failed sayaçlarını verir. Provider oranlarının denominator'ı `attempted_security_count` olup `PENDING/UNATTEMPTED` securities dahil edilmez. `run_provenance.json`; iki turun başlangıç/bitiş zamanlarını, `1200/1800` varsayılan veya CLI ile verilen bütçeleri, first-pass sonucunu, retry/recovered/remaining listelerini, hata geçmişini, kullanılan/dışlanan security listelerini ve her snapshot için ID/checksum/input IDs/row count/status/source/layer/used-security-count alanlarını taşır. `collection_configuration`; security worker sayısı, global İş Yatırım concurrency/interval, tek-writer/deterministik commit, empty cache schema/migration ve yFinance first-observation hint'in kapsam daraltmadığı bilgisini kaydeder. `PARTIAL`, kesilmiş veya derived zinciri tamamlanmamış koşu `experiment_ready=false` kalır.
 
 `ticker_mapping_review.csv` geç başlangıç, erken bitiş, her uzunluktaki iç oturum boşluğu, provider kapsam uyuşmazlığı, symbol/redirect, iki sağlayıcıda tarihçe yokluğu ve olası ticker geçiş sinyalini raporlar. `possible_historical_ticker` yalnız resmî kanıtla doldurulabilir; orchestration alias tahmin etmez ve ana mapping CSV'sini değiştirmez.
 
