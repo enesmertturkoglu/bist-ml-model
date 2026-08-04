@@ -5,6 +5,7 @@ from datetime import date
 import hashlib
 import json
 from pathlib import Path
+import threading
 
 import pandas as pd
 import pytest
@@ -500,9 +501,139 @@ def test_legacy_checkpoint_resume_starts_with_first_unattempted_security(
             encoding="utf-8"
         )
     )
-    assert payload["schema_version"] == "full_history_manifest_outcomes_v1"
+    assert payload["schema_version"] == "full_history_manifest_outcomes_v2_compact"
+    assert "isyatirim_dates" not in payload["latest_outcomes"][0]
+    assert "yfinance_dates" not in payload["latest_outcomes"][0]
     assert len(payload["latest_outcomes"]) == 2
     assert len(payload["attempt_history"]) == 3
+
+
+def test_v1_outcome_checkpoint_remains_readable_without_migration_loss(
+    tmp_path: Path,
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    preflight = pipeline.preflight()
+    row = preflight.manifest.iloc[0]
+    outcome = ManifestOutcome(
+        row_number=0,
+        security_id=str(row.security_id),
+        current_ticker=str(row.current_ticker),
+        provider_ticker=str(row.provider_ticker),
+        period_start=str(row.period_start),
+        period_end=str(row.period_end),
+        isyatirim_status="FAILED",
+        yfinance_status="FAILED",
+        nominal_status="FAILED",
+        isyatirim_raw_snapshot_id="",
+        yfinance_raw_snapshot_id="",
+        nominal_snapshot_id="",
+        isyatirim_dates=("2020-03-13",),
+        yfinance_dates=("2020-03-13",),
+        failure_stage="FIXTURE",
+        failure_class="TimeoutError",
+        failure_reason="fixture",
+        collection_pass=1,
+        retry_recommended=True,
+    )
+    status = build_collection_status(preflight, (outcome,))
+    summary = build_collection_summary(status)
+    provenance = pipeline._run_provenance(
+        preflight,
+        status,
+        summary,
+        run_status="COLLECTING_PASS_1",
+        run_started_at_utc="2026-08-04T00:00:00Z",
+        used_security_ids=(),
+        excluded_security_ids=(),
+        snapshots=(),
+        outcomes=(outcome,),
+    )
+    pipeline._write_collection_checkpoint(status, summary, provenance, (outcome,))
+    outcome_path = pipeline.paths.report_root / "collection_outcomes.json"
+    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+    payload["schema_version"] = "full_history_manifest_outcomes_v1"
+    for key in ("latest_outcomes", "attempt_history"):
+        payload[key][0]["isyatirim_dates"] = ["2020-03-13"]
+        payload[key][0]["yfinance_dates"] = ["2020-03-13"]
+    outcome_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    restored, history, _ = pipeline._load_collection_checkpoint(preflight)
+
+    assert restored[0].isyatirim_dates == ("2020-03-13",)
+    assert restored[0].yfinance_dates == ("2020-03-13",)
+    assert history[0].isyatirim_dates == ("2020-03-13",)
+
+
+def test_compact_checkpoint_hydrates_dates_from_verified_snapshots(
+    tmp_path: Path,
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    preflight = pipeline.preflight()
+    row = preflight.manifest.iloc[0]
+    request_values = {
+        "ticker_or_instrument": str(row.provider_ticker),
+        "request_start_date": date.fromisoformat(str(row.period_start)),
+        "request_end_date": date.fromisoformat(str(row.period_end)),
+        "request_parameters": {"fixture": True},
+        "code_commit_sha": "a" * 40,
+        "layer": "raw",
+        "input_snapshot_ids": (),
+    }
+    is_snapshot = pipeline.snapshot_store.save_dataframe(
+        pd.DataFrame({"HGDG_TARIH": pd.to_datetime(["2020-03-13"])}),
+        SnapshotRequest(
+            source="isyatirim",
+            dataset_type="historical_equity",
+            identity_columns=("HGDG_TARIH",),
+            **request_values,
+        ),
+    ).metadata
+    yf_snapshot = pipeline.snapshot_store.save_dataframe(
+        pd.DataFrame({"date": pd.to_datetime(["2020-03-13"])}),
+        SnapshotRequest(
+            source="yfinance",
+            dataset_type="historical_equity",
+            identity_columns=("date",),
+            **request_values,
+        ),
+    ).metadata
+    outcome = ManifestOutcome(
+        row_number=0,
+        security_id=str(row.security_id),
+        current_ticker=str(row.current_ticker),
+        provider_ticker=str(row.provider_ticker),
+        period_start=str(row.period_start),
+        period_end=str(row.period_end),
+        isyatirim_status="COMPLETE",
+        yfinance_status="COMPLETE",
+        nominal_status="FAILED",
+        isyatirim_raw_snapshot_id=is_snapshot.snapshot_id,
+        yfinance_raw_snapshot_id=yf_snapshot.snapshot_id,
+        nominal_snapshot_id="",
+        isyatirim_dates=("2020-03-13",),
+        yfinance_dates=("2020-03-13",),
+        collection_pass=1,
+    )
+    status = build_collection_status(preflight, (outcome,))
+    summary = build_collection_summary(status)
+    provenance = pipeline._run_provenance(
+        preflight,
+        status,
+        summary,
+        run_status="COLLECTING_PASS_1",
+        run_started_at_utc="2026-08-04T00:00:00Z",
+        used_security_ids=(),
+        excluded_security_ids=(),
+        snapshots=(),
+        outcomes=(outcome,),
+    )
+    pipeline._write_collection_checkpoint(status, summary, provenance, (outcome,))
+
+    restored, history, _ = pipeline._load_collection_checkpoint(preflight)
+
+    assert restored[0].isyatirim_dates == ("2020-03-13",)
+    assert restored[0].yfinance_dates == ("2020-03-13",)
+    assert history[0].isyatirim_dates == ("2020-03-13",)
 
 
 def test_resumed_retry_checkpoint_does_not_start_a_third_pass(
@@ -819,3 +950,96 @@ def test_worker_count_preserves_manifest_order_and_unique_security_tasks(
     status = build_collection_status(preflight, outcomes)
     assert status["security_id"].tolist() == security_order
     assert status["status"].eq("COMPLETE").all()
+
+
+def test_rolling_workers_submit_next_security_before_slow_predecessor_finishes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    pipeline.config = replace(
+        pipeline.config,
+        security_worker_count=2,
+        global_request_interval_seconds=0,
+    )
+    base = pipeline.preflight()
+    third_id = generate_security_id("CCC")
+    third_universe = base.universe.iloc[[0]].copy()
+    third_universe.loc[:, "security_id"] = third_id
+    third_universe.loc[:, "current_ticker"] = "CCC"
+    third_manifest = base.manifest.iloc[[0]].copy()
+    third_manifest.loc[:, "security_id"] = third_id
+    third_manifest.loc[:, "current_ticker"] = "CCC"
+    third_manifest.loc[:, "provider_ticker"] = "CCC"
+    preflight = replace(
+        base,
+        universe=pd.concat([base.universe, third_universe], ignore_index=True),
+        manifest=pd.concat([base.manifest, third_manifest], ignore_index=True),
+    )
+    security_order = list(preflight.universe["security_id"].astype(str))
+    manifest_groups = {
+        str(key): group.sort_index()
+        for key, group in preflight.manifest.groupby("security_id", sort=False)
+    }
+    eligible = {
+        security_id: tuple(map(int, manifest_groups[security_id].index))
+        for security_id in security_order
+    }
+    third_started = threading.Event()
+
+    def fake_prepare_security(
+        _preflight: object,
+        _limiter: object,
+        security_id: str,
+        security_position: int,
+        rows: pd.DataFrame,
+        **kwargs: object,
+    ) -> PreparedSecurity:
+        if security_id == security_order[0]:
+            assert third_started.wait(timeout=2)
+        elif security_id == security_order[2]:
+            third_started.set()
+        prepared_rows = tuple(
+            PreparedManifestRow(
+                row_number=int(row_number),
+                row=row.to_dict(),
+                prepared=None,
+                error=None,
+                collection_pass=int(kwargs["collection_pass"]),
+                security_position=security_position,
+                security_started_at=0.0,
+                security_budget_seconds=float(kwargs["security_budget_seconds"]),
+                elapsed_seconds=0.0,
+            )
+            for row_number, row in rows.iterrows()
+        )
+        return PreparedSecurity(security_id, security_position, 0.0, prepared_rows)
+
+    def fake_commit(_writer: object, item: PreparedManifestRow) -> ManifestOutcome:
+        return _complete(
+            item.row_number,
+            str(item.row["security_id"]),
+            str(item.row["current_ticker"]),
+        )
+
+    monkeypatch.setattr(pipeline, "_prepare_security", fake_prepare_security)
+    monkeypatch.setattr(pipeline, "_commit_prepared_manifest_row", fake_commit)
+    limiter = GlobalRequestLimiter(max_concurrency=2, request_interval_seconds=0)
+
+    results = list(
+        pipeline._collection_pass_results(
+            preflight,
+            object(),
+            limiter,
+            security_order,
+            security_order,
+            manifest_groups,
+            eligible,
+            collection_pass=1,
+            security_budget_seconds=1200,
+            refresh=False,
+        )
+    )
+
+    assert third_started.is_set()
+    assert [security_id for _, security_id, _, _ in results] == security_order

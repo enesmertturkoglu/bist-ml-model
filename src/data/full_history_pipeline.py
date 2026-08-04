@@ -8,8 +8,8 @@ import os
 import re
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, field
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -64,7 +64,8 @@ DEFAULT_MASTER_SECURITY_COUNT = 621
 DEFAULT_REPORT_ROOT = Path("reports/full_history")
 DEFAULT_FIRST_PASS_SECURITY_BUDGET_SECONDS = 20 * 60.0
 DEFAULT_RETRY_PASS_SECURITY_BUDGET_SECONDS = 30 * 60.0
-OUTCOME_CHECKPOINT_SCHEMA_VERSION = "full_history_manifest_outcomes_v1"
+OUTCOME_CHECKPOINT_SCHEMA_VERSION = "full_history_manifest_outcomes_v2_compact"
+LEGACY_OUTCOME_CHECKPOINT_SCHEMA_VERSIONS = ("full_history_manifest_outcomes_v1",)
 
 COLLECTION_STATUS_COLUMNS: tuple[str, ...] = (
     "security_id",
@@ -260,10 +261,12 @@ class ManifestOutcome:
         )
 
 
-def manifest_outcome_to_dict(outcome: ManifestOutcome) -> dict[str, Any]:
+def manifest_outcome_to_dict(
+    outcome: ManifestOutcome, *, include_dates: bool = True
+) -> dict[str, Any]:
     """Serialize one row-level result for deterministic cross-process resume."""
 
-    return {
+    result = {
         "row_number": outcome.row_number,
         "security_id": outcome.security_id,
         "current_ticker": outcome.current_ticker,
@@ -276,8 +279,6 @@ def manifest_outcome_to_dict(outcome: ManifestOutcome) -> dict[str, Any]:
         "isyatirim_raw_snapshot_id": outcome.isyatirim_raw_snapshot_id,
         "yfinance_raw_snapshot_id": outcome.yfinance_raw_snapshot_id,
         "nominal_snapshot_id": outcome.nominal_snapshot_id,
-        "isyatirim_dates": list(outcome.isyatirim_dates),
-        "yfinance_dates": list(outcome.yfinance_dates),
         "failure_stage": outcome.failure_stage,
         "failure_class": outcome.failure_class,
         "failure_reason": outcome.failure_reason,
@@ -305,6 +306,10 @@ def manifest_outcome_to_dict(outcome: ManifestOutcome) -> dict[str, Any]:
         "empty_range_cache_hit_count": outcome.empty_range_cache_hit_count,
         "operational_hint_date": outcome.operational_hint_date,
     }
+    if include_dates:
+        result["isyatirim_dates"] = list(outcome.isyatirim_dates)
+        result["yfinance_dates"] = list(outcome.yfinance_dates)
+    return result
 
 
 def manifest_outcome_from_dict(value: Mapping[str, Any]) -> ManifestOutcome:
@@ -689,7 +694,12 @@ class FullHistoryPipeline:
         if outcome_path.is_file():
             try:
                 payload = json.loads(outcome_path.read_text(encoding="utf-8"))
-                if payload.get("schema_version") != OUTCOME_CHECKPOINT_SCHEMA_VERSION:
+                schema_version = str(payload.get("schema_version", ""))
+                supported_versions = {
+                    OUTCOME_CHECKPOINT_SCHEMA_VERSION,
+                    *LEGACY_OUTCOME_CHECKPOINT_SCHEMA_VERSIONS,
+                }
+                if schema_version not in supported_versions:
                     raise FullHistoryError("collection outcome checkpoint schema mismatch")
                 expected_context = {
                     "active_universe_snapshot_id": preflight.active_metadata.snapshot_id,
@@ -709,6 +719,11 @@ class FullHistoryPipeline:
                     manifest_outcome_from_dict(item)
                     for item in payload.get("attempt_history", [])
                 )
+                if schema_version == OUTCOME_CHECKPOINT_SCHEMA_VERSION:
+                    latest = tuple(self._hydrate_outcome_dates(item) for item in latest)
+                    history = tuple(
+                        self._hydrate_outcome_dates(item) for item in history
+                    )
                 self._validate_restored_outcomes(preflight, status, latest)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, FullHistoryError) as exc:
                 self._log(
@@ -943,6 +958,32 @@ class FullHistoryPipeline:
             return ()
         metadata = self.snapshot_store.get_snapshot(snapshot_id)
         return self._observed_dates(metadata, column)
+
+    def _hydrate_outcome_dates(self, outcome: ManifestOutcome) -> ManifestOutcome:
+        """Restore compact checkpoint date coverage from immutable snapshots."""
+
+        def verified_dates(snapshot_id: str, column: str) -> tuple[str, ...]:
+            try:
+                return self._snapshot_dates(snapshot_id, column)
+            except Exception:
+                # Snapshot usability is audited immediately after hydration. A
+                # missing/corrupt COMPLETE snapshot must make the row eligible
+                # for recollection rather than invalidate unrelated checkpoint rows.
+                return ()
+
+        return replace(
+            outcome,
+            isyatirim_dates=(
+                outcome.isyatirim_dates
+                or verified_dates(
+                    outcome.isyatirim_raw_snapshot_id, "HGDG_TARIH"
+                )
+            ),
+            yfinance_dates=(
+                outcome.yfinance_dates
+                or verified_dates(outcome.yfinance_raw_snapshot_id, "date")
+            ),
+        )
 
     def _validate_restored_outcomes(
         self,
@@ -1502,41 +1543,68 @@ class FullHistoryPipeline:
         with ThreadPoolExecutor(
             max_workers=worker_count, thread_name_prefix="history-security"
         ) as executor:
-            for offset in range(0, len(security_ids), worker_count):
-                batch = list(security_ids[offset : offset + worker_count])
-                futures = []
-                for security_id in batch:
+            in_flight: dict[Future[PreparedSecurity], str] = {}
+            prepared_buffer: dict[str, PreparedSecurity] = {}
+            submit_offset = 0
+            commit_offset = 0
+            max_buffered_results = max(worker_count, worker_count * 4)
+
+            def submit_available() -> None:
+                nonlocal submit_offset
+                while (
+                    submit_offset < len(security_ids)
+                    and len(in_flight) < worker_count
+                    and len(prepared_buffer) < max_buffered_results
+                ):
+                    security_id = security_ids[submit_offset]
+                    submit_offset += 1
                     position = security_order.index(security_id) + 1
                     rows = manifest_groups[security_id].loc[
                         list(eligible_rows[security_id])
                     ]
-                    futures.append(
-                        executor.submit(
-                            self._prepare_security,
-                            preflight,
-                            request_limiter,
-                            security_id,
-                            position,
-                            rows,
-                            collection_pass=collection_pass,
-                            security_budget_seconds=security_budget_seconds,
-                            refresh=refresh,
+                    future = executor.submit(
+                        self._prepare_security,
+                        preflight,
+                        request_limiter,
+                        security_id,
+                        position,
+                        rows,
+                        collection_pass=collection_pass,
+                        security_budget_seconds=security_budget_seconds,
+                        refresh=refresh,
+                    )
+                    in_flight[future] = security_id
+
+            submit_available()
+            while commit_offset < len(security_ids):
+                expected_id = security_ids[commit_offset]
+                if expected_id not in prepared_buffer:
+                    if not in_flight:
+                        raise FullHistoryError(
+                            "rolling collection scheduler lost an expected security"
                         )
+                    completed, _ = wait(
+                        tuple(in_flight), return_when=FIRST_COMPLETED
                     )
-                # Results and commits follow manifest/security order even when
-                # provider completion order differs.
-                for future in futures:
-                    prepared = future.result()
-                    outcomes = tuple(
-                        self._commit_prepared_manifest_row(writer, item)
-                        for item in prepared.rows
-                    )
-                    yield (
-                        prepared.security_position,
-                        prepared.security_id,
-                        prepared.security_started_at,
-                        outcomes,
-                    )
+                    for future in completed:
+                        security_id = in_flight.pop(future)
+                        prepared_buffer[security_id] = future.result()
+                    submit_available()
+                    continue
+
+                prepared = prepared_buffer.pop(expected_id)
+                outcomes = tuple(
+                    self._commit_prepared_manifest_row(writer, item)
+                    for item in prepared.rows
+                )
+                commit_offset += 1
+                submit_available()
+                yield (
+                    prepared.security_position,
+                    prepared.security_id,
+                    prepared.security_started_at,
+                    outcomes,
+                )
 
     def _collect_manifest_row(
         self,
@@ -1758,10 +1826,12 @@ class FullHistoryPipeline:
                 ),
                 "mapping_checksum": provenance.get("mapping_checksum", ""),
                 "latest_outcomes": [
-                    manifest_outcome_to_dict(item) for item in latest
+                    manifest_outcome_to_dict(item, include_dates=False)
+                    for item in latest
                 ],
                 "attempt_history": [
-                    manifest_outcome_to_dict(item) for item in history
+                    manifest_outcome_to_dict(item, include_dates=False)
+                    for item in history
                 ],
             },
         )

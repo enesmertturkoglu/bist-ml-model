@@ -959,6 +959,28 @@ Geçerli boş dönemleri transient hata saymak yeni halka arzlarda kontrolsüz r
 
 2026-08-03
 
+### D037 — Full-Range-First ve Kayan Worker Collection
+
+**Karar:**
+
+İş Yatırım tarihsel veri isteği, cache tarafından kapsanmayan dönem için önce bağlayıcı tarih aralığının tamamını tek request ile sorgular. Yalnız timeout, bağlantı hatası, 429 veya retry-edilebilir 5xx gibi gerçek transient hata bounded retry sonrasında sürerse aralık önce 12 aylık, sonra gerektiğinde 6 ve 3 aylık parçalara ayrılır. `NO_DATA_IN_RANGE` ve kalıcı schema/ticker/tarih tutarlılığı hataları bu fallback'i başlatmaz. yFinance ilk gözlem tarihi provenance'da operasyonel sinyal olarak kalır; tarih kapsamını daraltmaz veya eski dönemleri atlamaz.
+
+Üç security worker sabit üçlü batch bariyerleriyle değil kayan kuyrukla çalışır: herhangi bir worker tamamlandığında sıradaki tekil security task'ı alınır. Coordinator, completion sırasından bağımsız biçimde yalnız manifest/security sırasındaki hazır sonucu snapshot ve checkpoint'e commit eder. Böylece yavaş bir security boşalan diğer worker slotlarını durdurmaz; aynı security aynı pass içinde yine tek task'tır.
+
+`collection_outcomes.json` yeni yazımlarda `full_history_manifest_outcomes_v2_compact` şemasını kullanır. Tekrarlanan tarih dizileri checkpoint'e yazılmaz; resume sırasında yalnız fiziksel checksum doğrulamasından geçen immutable snapshot'lardan yeniden oluşturulur. Eski `full_history_manifest_outcomes_v1` satırları geriye uyumlu okunur ve sessizce silinmez. yFinance multi-ticker coalescing, gerçek benchmark'ta batch boyutuna bağlı ham snapshot checksum riski gösterdiği için production yoluna alınmaz; per-security yFinance çağrısı korunur.
+
+**Gerekçe:**
+
+Sabit yıllık İş Yatırım parçaları 621 security için binlerce gereksiz request ve global rate-limit altında saatler süren yapay alt sınır oluşturuyordu. Tam aralık response'larının gerçek örneklerde birkaç saniyede ve doğru kapsamla döndüğü doğrulandı. Kayan kuyruk head-of-line beklemesini, compact checkpoint ise her security sonrasında büyüyen ortak rapor yeniden yazma maliyetini azaltır; manifest-sıralı tek-yazar ve fiziksel snapshot doğrulaması resume güvenliğini korur.
+
+**Etkilenen alanlar:**
+
+İş Yatırım request planı ve telemetrisi, full-history worker scheduler'ı, satır düzeyi checkpoint şeması, resume ve production işletimi. D020, D024–D034 ile feature/model/walk-forward kararları değiştirilmemiştir.
+
+**Tarih:**
+
+2026-08-04
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

@@ -116,9 +116,11 @@ class ClientStats:
     connection_error_count: int = 0
     http_429_count: int = 0
     http_5xx_count: int = 0
+    full_range_requests: int = 0
     yearly_requests: int = 0
     six_month_requests: int = 0
     three_month_requests: int = 0
+    split_to_year_count: int = 0
     split_to_six_month_count: int = 0
     split_to_three_month_count: int = 0
     timeout_recovered_chunks: int = 0
@@ -283,6 +285,12 @@ def _add_months(value: date, months: int) -> date:
     return date(year, month, min(value.day, last_day))
 
 
+def _inclusive_month_span(start: date, end: date) -> int:
+    """Return a stable positive month label for a requested inclusive range."""
+
+    return max(1, (end.year - start.year) * 12 + end.month - start.month + 1)
+
+
 def split_date_range(start: date, end: date, months: int) -> list[tuple[date, date]]:
     """Split an inclusive date range without gaps or duplicate boundary days."""
     if months < 1:
@@ -428,86 +436,55 @@ class IsYatirimClient:
         try:
             frames: list[pd.DataFrame] = []
             failures: list[RequestFailure] = []
-            annual_ranges = split_date_range(start, end, 12)
+            initial_chunk_months = _inclusive_month_span(start, end)
             if first_observed_hint is not None:
                 hint = _coerce_date(first_observed_hint)
-                containing = [
-                    item for item in annual_ranges if item[0] <= hint <= item[1]
-                ]
-                if containing:
-                    selected = containing[0]
-                    earlier = [item for item in annual_ranges if item[1] < selected[0]]
-                    later = [item for item in annual_ranges if item[0] > selected[1]]
-                    annual_ranges = [selected, *reversed(earlier), *later]
-                    self._log(
-                        f"[ISYATIRIM][{ticker}] yFinance first-observation hint "
-                        f"used={hint.isoformat()} verification_range="
-                        f"{selected[0].isoformat()}..{selected[1].isoformat()}"
-                    )
-            for annual_index, (annual_start, annual_end) in enumerate(annual_ranges):
-                cached_frames: list[pd.DataFrame] = []
-                gaps = [(annual_start, annual_end)]
-                cache_used = False
-                if not self.refresh_cache:
-                    cached_frames, gaps, cache_used = self._load_cached_coverage(
-                        ticker, annual_start, annual_end
-                    )
-                    frames.extend(cached_frames)
-                for gap_index, (gap_start, gap_end) in enumerate(gaps):
-                    try:
-                        frames.extend(
-                            self._fetch_range(
-                                ticker,
-                                gap_start,
-                                gap_end,
-                                chunk_months=12,
-                                inherited_timeout=False,
-                                cache_used=cache_used,
-                            )
+                self._log(
+                    f"[ISYATIRIM][{ticker}] yFinance first-observation hint "
+                    f"recorded={hint.isoformat()} optimization=full_range_first "
+                    "coverage_skipped=false"
+                )
+
+            cached_frames: list[pd.DataFrame] = []
+            gaps = [(start, end)]
+            cache_used = False
+            if not self.refresh_cache:
+                cached_frames, gaps, cache_used = self._load_cached_coverage(
+                    ticker, start, end
+                )
+                frames.extend(cached_frames)
+            for gap_index, (gap_start, gap_end) in enumerate(gaps):
+                try:
+                    frames.extend(
+                        self._fetch_range(
+                            ticker,
+                            gap_start,
+                            gap_end,
+                            chunk_months=_inclusive_month_span(gap_start, gap_end),
+                            inherited_timeout=False,
+                            cache_used=cache_used,
                         )
-                    except IsYatirimBudgetFetchError as error:
-                        failures.extend(error.failures)
-                        if not error.partial_data.empty:
-                            frames.append(error.partial_data)
-                        failures.extend(
-                            self._unattempted_budget_failures(
-                                ticker,
-                                gaps[gap_index + 1 :],
-                                chunk_months=12,
-                                cache_used=cache_used,
-                            )
+                    )
+                except IsYatirimBudgetFetchError as error:
+                    failures.extend(error.failures)
+                    if not error.partial_data.empty:
+                        frames.append(error.partial_data)
+                    failures.extend(
+                        self._unattempted_budget_failures(
+                            ticker,
+                            gaps[gap_index + 1 :],
+                            chunk_months=initial_chunk_months,
+                            cache_used=cache_used,
                         )
-                        for pending_start, pending_end in annual_ranges[
-                            annual_index + 1 :
-                        ]:
-                            pending_cached: list[pd.DataFrame] = []
-                            pending_gaps = [(pending_start, pending_end)]
-                            pending_cache_used = False
-                            if not self.refresh_cache:
-                                (
-                                    pending_cached,
-                                    pending_gaps,
-                                    pending_cache_used,
-                                ) = self._load_cached_coverage(
-                                    ticker, pending_start, pending_end
-                                )
-                                frames.extend(pending_cached)
-                            failures.extend(
-                                self._unattempted_budget_failures(
-                                    ticker,
-                                    pending_gaps,
-                                    chunk_months=12,
-                                    cache_used=pending_cache_used,
-                                )
-                            )
-                        combined = _merge_frames(frames, start, end)
-                        raise IsYatirimBudgetFetchError(
-                            failures, partial_data=combined
-                        ) from error
-                    except IsYatirimFetchError as error:
-                        failures.extend(error.failures)
-                        if not error.partial_data.empty:
-                            frames.append(error.partial_data)
+                    )
+                    combined = _merge_frames(frames, start, end)
+                    raise IsYatirimBudgetFetchError(
+                        failures, partial_data=combined
+                    ) from error
+                except IsYatirimFetchError as error:
+                    failures.extend(error.failures)
+                    if not error.partial_data.empty:
+                        frames.append(error.partial_data)
 
             combined = _merge_frames(frames, start, end)
             if failures:
@@ -587,7 +564,9 @@ class IsYatirimClient:
                 self.stats.failures.append(failure)
                 raise IsYatirimFetchError([failure]) from attempt_failure.error
 
-            if next_months == 6:
+            if next_months == 12:
+                self.stats.split_to_year_count += 1
+            elif next_months == 6:
                 self.stats.split_to_six_month_count += 1
             elif next_months == 3:
                 self.stats.split_to_three_month_count += 1
@@ -656,6 +635,8 @@ class IsYatirimClient:
         return [frame]
 
     def _next_chunk_months(self, chunk_months: int) -> int | None:
+        if chunk_months > 12:
+            return 12
         if chunk_months > 6 and self.minimum_chunk_months <= 6:
             return 6
         if chunk_months > 3 and self.minimum_chunk_months <= 3:
@@ -888,7 +869,9 @@ class IsYatirimClient:
         return min(max(value, 0.0), 1.0) * self.jitter_max_seconds
 
     def _count_request_size(self, chunk_months: int) -> None:
-        if chunk_months >= 12:
+        if chunk_months > 12:
+            self.stats.full_range_requests += 1
+        elif chunk_months >= 12:
             self.stats.yearly_requests += 1
         elif chunk_months >= 6:
             self.stats.six_month_requests += 1

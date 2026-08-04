@@ -205,6 +205,17 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - Gerçek izole benchmark AEFES, MOPAS ve IZENR üzerinde workers `1/2/3` ile tamamlandı. Üç koşuda status, gap sınıfı ve İş Yatırım/yFinance/nominal checksum'ları aynı kaldı. Toplam süreler sırasıyla `96.768 / 131.234 / 54.227` saniye; gözlenen global İş Yatırım concurrency `1 / 2 / 2` oldu. MOPAS workers=1 sonucu `8` toplam network request, `0` retry, `4` empty range ve `12.866` saniyedir; eski production sonucu `134 request / 106 retry / 1204.540 saniye` idi. Gerçek resume `0` network, `7` cache hit ve `4` empty-range cache hit verdi.
 - Tam regresyon `353 passed` tamamlandı; `compileall`, `pip check` ve `git diff --check` başarılıdır. Gerçek LightGBM çağrılmadı, 32 feature/model/walk-forward kararları değişmedi ve `EXPERIMENT_LOG.md` oluşturulmadı.
 
+## Full-Range-First ve Kayan Worker Collection — 2026-08-04
+
+- D037 ile İş Yatırım, cache tarafından kapsanmayan dönemi önce tek tam-aralık request ile sorgular. Yalnız gerçek transient hata bounded retry sonrasında sürerse `tam aralık → 12 → 6 → 3 ay` fallback'i çalışır; empty ve kalıcı schema hataları split üretmez. Veri başlangıcı `2020-03-13` ve 621-security kapsamı değişmemiştir.
+- Sabit worker batch bariyeri kaldırıldı. Worker slotu boşalınca sıradaki tekil security task'ı başlar; coordinator sonucu yine manifest/security sırasında commit eder. Worker ortak snapshot/checkpoint dosyasına yazmaz.
+- `collection_outcomes.json` yeni yazımlarda compact v2 şemasına geçer. Büyük tarih dizileri immutable ve fiziksel checksum doğrulamalı snapshot'lardan resume sırasında yeniden oluşturulur; v1 checkpoint geriye uyumlu okunur. Bu değişiklik production raporlarının her security sonrasında yeniden yazma maliyetini düşürür.
+- yFinance multi-ticker coalescing gerçek benchmark'ta batch boyutuna bağlı ham checksum riski gösterdiği için production yoluna alınmadı. Per-security yFinance çağrısı korunarak workers `1/2/3` checksum eşdeğerliği sağlandı.
+- Production süreci güvenli atomik sınırda durduruldu. Korunan tutarlı checkpoint `166 attempted / 141 complete / 21 partial / 0 failed / 4 no-history / 455 unattempted`; first pass bitmemiş, retry pass başlamamış, derived zincir başlamamış ve `experiment_ready=false` durumundadır. İlk `UNATTEMPTED` security `PENGD`'dir.
+- İzole gerçek 12-security benchmark AEFES, MOPAS, EKSUN, TATEN, VBTYZ, MNDRS, TDGYO, PENGD, BORSK, REEDR, BINHO ve ASTOR üzerinde tamamlandı. workers `1/2/3` süreleri `28.763 / 12.081 / 29.921` saniye oldu; üç koşuda 12/12 `COMPLETE`, status/gap, used/excluded kapsamı ve bütün İş Yatırım/yFinance/nominal checksum'ları birebir aynı kaldı. workers=3 ölçümünde BORSK ilk-pass transient olup ikinci turda iyileştiği için küçük örnekte workers=2'den yavaş kaldı.
+- MOPAS eski production davranışı `134 request / 106 retry / 1204.540 saniye` idi. Yeni 12-security koşusunda MOPAS `2 request / 0 retry / COMPLETE`; ayrı tekrar ölçümünde geçici yFinance hatası nedeniyle `3 request / 1 retry / 34.882 saniye` oldu. Her iki yeni gözlem de eski request patlamasını ortadan kaldırdı.
+- Tam regresyon `357 passed`; `compileall`, `pip check` ve `git diff --check` başarılıdır. LightGBM çağrılmadı, 32 feature/model/walk-forward kararları değişmedi ve `EXPERIMENT_LOG.md` oluşturulmadı.
+
 ## Kesinleşen Başlangıç Senaryosu
 
 - Tahmin zamanı: `T` günü piyasa kapandıktan sonra
@@ -251,8 +262,8 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Görevler
 
-1. `python -u scripts/run_full_history_pipeline.py --security-workers 3 --isyatirim-max-concurrency 2` komutuyla production collection'ı 43/621 checkpoint'inden ve EKSUN satırından sürdür.
-2. 621 security'nin tamamını D035 iki turlu bütçe ve D036 kontrollü paralellik akışıyla dene; doğrulanmış COMPLETE snapshot/cache kapsamını yeniden fetch etme.
+1. `python -u scripts/run_full_history_pipeline.py --security-workers 3 --isyatirim-max-concurrency 2` komutuyla production collection'ı 166/621 checkpoint'inden ve PENGD satırından sürdür.
+2. 621 security'nin tamamını D035–D037 kontrollü collection akışıyla dene; doğrulanmış COMPLETE snapshot/cache kapsamını yeniden fetch etme.
 3. Collection tamamlandıktan sonra identity, clean, label, XU100, exact 32 `baseline_v1`, prediction universe ve veri-kalitesi raporlarını üret.
 4. Fold feasibility sonuçlarını LightGBM eğitmeden incele.
 5. İlk gerçek 20 oturumluk test başlangıç tarihini ayrı kararla kesinleştir.

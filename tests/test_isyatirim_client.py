@@ -505,17 +505,39 @@ def test_corrupt_empty_range_cache_fails_closed_and_requeries(tmp_path: Path) ->
     assert second.stats.cache_corruption_count == 1
 
 
-def test_empty_year_does_not_block_other_populated_year(tmp_path: Path) -> None:
+def test_full_range_collects_multiple_years_in_one_request(tmp_path: Path) -> None:
     client, session = _client(
         tmp_path,
-        [FakeResponse({"value": []}), _response("01-01-2025")],
+        [_response("01-01-2024", "01-01-2025")],
     )
 
     result = client.fetch_history("THYAO", "2024-01-01", "2025-12-31")
 
-    assert len(session.calls) == 2
-    assert result["HGDG_TARIH"].tolist() == [pd.Timestamp("2025-01-01")]
-    assert client.stats.no_data_range_count == 1
+    assert len(session.calls) == 1
+    assert result["HGDG_TARIH"].tolist() == [
+        pd.Timestamp("2024-01-01"),
+        pd.Timestamp("2025-01-01"),
+    ]
+    assert client.stats.full_range_requests == 1
+
+
+def test_full_range_timeout_falls_back_to_years(tmp_path: Path) -> None:
+    client, session = _client(
+        tmp_path,
+        [
+            requests.Timeout("full"),
+            _response("01-01-2024"),
+            _response("01-01-2025"),
+        ],
+    )
+
+    result = client.fetch_history("THYAO", "2024-01-01", "2025-12-31")
+
+    assert len(session.calls) == 3
+    assert len(result) == 2
+    assert client.stats.full_range_requests == 1
+    assert client.stats.yearly_requests == 2
+    assert client.stats.split_to_year_count == 1
 
 
 def test_populated_response_entirely_outside_range_is_permanent_schema_error(
@@ -760,9 +782,13 @@ def test_empty_response_time_does_not_consume_security_budget(
 ) -> None:
     clock = FakeClock()
     session = VariableAdvancingQueueSession(
-        [FakeResponse({"value": []}), _response("30-06-2024")],
+        [
+            requests.Timeout("full"),
+            FakeResponse({"value": []}),
+            _response("30-06-2024"),
+        ],
         clock,
-        advance_seconds=[2.0, 0.2],
+        advance_seconds=[0.1, 2.0, 0.2],
     )
     client = IsYatirimClient(
         session=session,
@@ -784,7 +810,7 @@ def test_empty_response_time_does_not_consume_security_budget(
     )
 
     assert len(result) == 1
-    assert len(session.calls) == 2
+    assert len(session.calls) == 3
     assert client.stats.no_data_range_count == 1
     assert client.stats.time_budget_exceeded_count == 0
 
@@ -819,8 +845,7 @@ def test_budget_failure_reports_later_unattempted_ranges(tmp_path: Path) -> None
         (item.start_date, item.end_date, item.error_type, item.attempts)
         for item in captured.value.failures
     ] == [
-        (date(2024, 1, 1), date(2024, 12, 31), TIME_BUDGET_EXCEEDED, 0),
-        (date(2025, 1, 1), date(2025, 12, 31), TIME_BUDGET_EXCEEDED, 0),
+        (date(2024, 1, 1), date(2025, 12, 31), TIME_BUDGET_EXCEEDED, 0),
     ]
 
 
