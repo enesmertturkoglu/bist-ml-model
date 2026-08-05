@@ -449,6 +449,28 @@ def test_identity_series_flows_through_cleaning_and_labels(tmp_path: Path) -> No
     assert clean.frame["security_id"].eq("SEC_TEST001").all()
     assert set(clean.frame["observed_ticker"].dropna()) == {"ESKI", "YENI"}
     assert clean.frame["current_ticker"].eq("YENI").all()
+    expected_row_inputs = {
+        "ESKI": [old_is_raw, old_yf_raw, old_nominal],
+        "YENI": [new_is_raw, new_yf_raw, new_nominal],
+    }
+    expected_row_checksums = {
+        ticker: [store.get_snapshot(snapshot_id).content_checksum for snapshot_id in ids]
+        for ticker, ids in expected_row_inputs.items()
+    }
+    for row in clean.frame.itertuples(index=False):
+        assert row.input_snapshot_ids == expected_row_inputs[row.ticker]
+        assert row.input_snapshot_checksums == expected_row_checksums[row.ticker]
+        assert len(row.input_snapshot_ids) == 3
+        assert len(row.input_snapshot_checksums) == 3
+    assert clean.snapshot.metadata.input_snapshot_ids == (
+        old_is_raw,
+        old_yf_raw,
+        old_nominal,
+        new_is_raw,
+        new_yf_raw,
+        new_nominal,
+        identity.snapshot.metadata.snapshot_id,
+    )
     assert clean.snapshot.metadata.identity_columns == (
         "security_id",
         "prediction_date",

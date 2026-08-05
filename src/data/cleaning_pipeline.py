@@ -169,26 +169,12 @@ class MarketDataCleaningPipeline:
             raise CleaningInputError(
                 "verified inputs do not contain a complete T+1..T+3 BIST-calendar window"
             )
-        if identity_metadata is None:
-            cleaned["input_snapshot_ids"] = cleaned["ticker"].map(
-                lambda ticker: provenance[str(ticker)][0]
-            )
-            cleaned["input_snapshot_checksums"] = cleaned["ticker"].map(
-                lambda ticker: provenance[str(ticker)][1]
-            )
-        else:
-            identity_input_metadata = [
-                *[item for inputs in verified for item in inputs.metadata],
-                identity_metadata,
-            ]
-            all_row_ids = [item.snapshot_id for item in identity_input_metadata]
-            all_row_checksums = [
-                item.content_checksum for item in identity_input_metadata
-            ]
-            cleaned["input_snapshot_ids"] = [list(all_row_ids) for _ in range(len(cleaned))]
-            cleaned["input_snapshot_checksums"] = [
-                list(all_row_checksums) for _ in range(len(cleaned))
-            ]
+        cleaned["input_snapshot_ids"] = cleaned["ticker"].map(
+            lambda ticker: provenance[str(ticker)][0]
+        )
+        cleaned["input_snapshot_checksums"] = cleaned["ticker"].map(
+            lambda ticker: provenance[str(ticker)][1]
+        )
         cleaned["cleaning_config_checksum"] = self.config.cleaning.checksum(
             self.config.checksum_algorithm
         )
