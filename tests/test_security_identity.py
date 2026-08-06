@@ -387,9 +387,40 @@ def test_identity_pipeline_records_mapping_checksum_and_is_idempotent(
     assert first.snapshot.metadata.request_parameters[
         "ticker_mapping_checksum"
     ] == mapping.checksum
+    assert first.snapshot.metadata.revision_context["code_commit_sha"] == "a" * 40
+    assert first.snapshot.metadata.revision_context[
+        "input_content_checksums"
+    ] == {
+        nominal_id: store.get_snapshot(nominal_id).content_checksum,
+    }
     assert first.frame.loc[0, "security_id"] == "SEC_444a261b8b9b"
     assert first.snapshot.metadata.snapshot_id == second.snapshot.metadata.snapshot_id
     assert not second.snapshot.created
+
+
+def test_identity_code_change_creates_new_revision_with_same_content(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    store = SnapshotStore(config)
+    nominal_id = _save_nominal(store, "THYAO", ["2024-01-03"])
+    mapping = _empty_mapping()
+
+    first = SecurityIdentityPipeline(
+        config, snapshot_store=store, code_commit_sha="a" * 40
+    ).run([nominal_id], mapping)
+    second = SecurityIdentityPipeline(
+        config, snapshot_store=store, code_commit_sha="b" * 40
+    ).run([nominal_id], mapping)
+
+    assert second.snapshot.created
+    assert second.snapshot.metadata.snapshot_id != first.snapshot.metadata.snapshot_id
+    assert second.snapshot.metadata.revision_number == 2
+    assert (
+        second.snapshot.metadata.content_checksum
+        == first.snapshot.metadata.content_checksum
+    )
+    assert second.snapshot.metadata.revision_context["code_commit_sha"] == "b" * 40
 
 
 def test_mapping_change_creates_new_snapshot_and_preserves_old_snapshot(

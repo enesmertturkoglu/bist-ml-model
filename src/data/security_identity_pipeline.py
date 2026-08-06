@@ -74,7 +74,18 @@ class SecurityIdentityPipeline:
 
         input_ids = tuple(value.snapshot_id for value in metadata)
         input_checksums = tuple(value.content_checksum for value in metadata)
+        input_checksum_by_id = {
+            value.snapshot_id: value.content_checksum for value in metadata
+        }
         security_ids = sorted(map(str, identity["security_id"].unique()))
+        revision_context = {
+            "input_snapshot_ids": list(input_ids),
+            "input_content_checksums": input_checksum_by_id,
+            "identity_version": "d027-v1",
+            "ticker_mapping_version": mapping.version,
+            "ticker_mapping_checksum": mapping.checksum,
+            "code_commit_sha": self.code_commit_sha,
+        }
         request = SnapshotRequest(
             source="security_identity",
             dataset_type="nominal_ohlc",
@@ -95,6 +106,7 @@ class SecurityIdentityPipeline:
             layer="derived",
             input_snapshot_ids=input_ids,
             identity_columns=("security_id", "date"),
+            revision_context=revision_context,
         )
         written = self.snapshot_store.save_dataframe(identity, request)
         statuses = (
