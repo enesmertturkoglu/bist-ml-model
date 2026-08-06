@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -9,6 +11,54 @@ from src.features.catalog import BASELINE_V1_FEATURES, catalog_file_checksum
 from src.features.input_assembler import FeatureInputAssembler, FeatureInputError
 from src.features.pipeline import BaselineFeaturePipeline, validate_feature_snapshot
 from tests.feature_snapshot_support import make_bundle
+
+
+def _with_extra_yfinance_row(bundle, row_date: pd.Timestamp):
+    yfinance = bundle.store.read_dataframe(bundle.yfinance_ids[0])
+    extra_yfinance = yfinance.iloc[[0]].copy()
+    extra_yfinance["date"] = row_date
+    yfinance = pd.concat([yfinance, extra_yfinance], ignore_index=True)
+    start = pd.to_datetime(yfinance["date"]).min().date()
+    end = pd.to_datetime(yfinance["date"]).max().date()
+    yfinance_id = bundle.store.save_dataframe(
+        yfinance,
+        SnapshotRequest(
+            source="yfinance",
+            dataset_type="equity_history",
+            ticker_or_instrument="BIST_BATCH",
+            request_start_date=start,
+            request_end_date=end,
+            request_parameters={"auto_adjust": False, "actions": True},
+            layer="raw",
+            identity_columns=("ticker", "date"),
+        ),
+    ).metadata.snapshot_id
+
+    identity = bundle.store.read_dataframe(bundle.identity_id)
+    extra_identity = identity.iloc[[0]].copy()
+    extra_identity["date"] = row_date
+    identity = pd.concat([identity, extra_identity], ignore_index=True)
+    identity_id = bundle.store.save_dataframe(
+        identity,
+        SnapshotRequest(
+            source="security_identity",
+            dataset_type="nominal_ohlc",
+            ticker_or_instrument="BIST_BATCH",
+            request_start_date=start,
+            request_end_date=end,
+            request_parameters={
+                "ticker_mapping_version": "test-map-v1",
+                "ticker_mapping_checksum": "test-map-checksum",
+            },
+            layer="derived",
+            identity_columns=("security_id", "date"),
+        ),
+    ).metadata.snapshot_id
+    return replace(
+        bundle,
+        yfinance_ids=(yfinance_id,),
+        identity_id=identity_id,
+    )
 
 
 def _run(bundle, *, code_sha: str = "a" * 40):
@@ -112,3 +162,51 @@ def test_feature_quality_summary_is_compact_not_per_row_reason_columns(tmp_path)
     assert cs_ret_1["warmup"] == 20
     assert cs_ret_1["source_missing"] == 0
     assert not any(column.startswith("missing_reason_") for column in result.frame.columns)
+
+
+def test_yfinance_non_session_row_within_calendar_bounds_is_excluded_and_audited(
+    tmp_path,
+) -> None:
+    bundle = make_bundle(tmp_path)
+    bundle = _with_extra_yfinance_row(bundle, pd.Timestamp("2024-01-06"))
+
+    assembly = FeatureInputAssembler(bundle.store).assemble(
+        yfinance_raw_snapshot_ids=bundle.yfinance_ids,
+        isyatirim_raw_snapshot_ids=bundle.isyatirim_ids,
+        identity_snapshot_id=bundle.identity_id,
+        xu100_snapshot_id=bundle.xu100_id,
+        calendar_snapshot_id=bundle.calendar_id,
+    )
+    result = _run(bundle)
+
+    assert len(assembly.frame) == 20 * 30
+    assert assembly.excluded_non_session_rows.to_dict(orient="records") == [
+        {
+            "observed_ticker": "T000",
+            "prediction_date": pd.Timestamp("2024-01-06"),
+            "exclusion_reason": (
+                "YFINANCE_NON_SESSION_WITHIN_VERIFIED_CALENDAR_BOUNDS"
+            ),
+        }
+    ]
+    audit = result.snapshot.revision_context[
+        "excluded_non_session_provider_rows"
+    ]
+    assert audit["row_count"] == 1
+    assert audit["ticker_count"] == 1
+    assert audit["date_counts"] == {"2024-01-06": 1}
+    assert len(audit["checksum"]) == 64
+
+
+def test_yfinance_row_outside_calendar_bounds_remains_fail_closed(tmp_path) -> None:
+    bundle = make_bundle(tmp_path)
+    bundle = _with_extra_yfinance_row(bundle, pd.Timestamp("2024-03-01"))
+
+    with pytest.raises(FeatureInputError, match="outside verified global calendar bounds"):
+        FeatureInputAssembler(bundle.store).assemble(
+            yfinance_raw_snapshot_ids=bundle.yfinance_ids,
+            isyatirim_raw_snapshot_ids=bundle.isyatirim_ids,
+            identity_snapshot_id=bundle.identity_id,
+            xu100_snapshot_id=bundle.xu100_id,
+            calendar_snapshot_id=bundle.calendar_id,
+        )

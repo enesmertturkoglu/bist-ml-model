@@ -183,6 +183,16 @@ def test_pipeline_records_input_ids_checksums_and_cleaning_identity(tmp_path: Pa
     assert len(row["input_snapshot_checksums"]) == 3
     assert row["cleaning_config_checksum"] == config.cleaning.checksum()
     assert row["cleaning_code_commit_sha"] == "c" * 40
+    assert result.snapshot.metadata.revision_context["code_commit_sha"] == "c" * 40
+    assert result.snapshot.metadata.revision_context["input_snapshot_ids"] == list(
+        inputs.input_snapshot_ids
+    )
+    assert result.snapshot.metadata.revision_context[
+        "input_content_checksums"
+    ] == {
+        snapshot_id: store.get_snapshot(snapshot_id).content_checksum
+        for snapshot_id in inputs.input_snapshot_ids
+    }
 
 
 def test_pipeline_records_official_tick_rule_provenance(tmp_path: Path) -> None:

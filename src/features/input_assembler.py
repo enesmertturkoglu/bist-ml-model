@@ -77,6 +77,7 @@ class FeatureInputAssembly:
     frame: pd.DataFrame
     benchmark: pd.DataFrame
     calendar: pd.DataFrame
+    excluded_non_session_rows: pd.DataFrame
     metadata: tuple[SnapshotMetadata, ...]
     mapping_version: str
     mapping_checksum: str
@@ -134,7 +135,40 @@ class FeatureInputAssembler:
             calendar_snapshot_id, ("isyatirim", "global_bist_sessions", "derived")
         )
 
+        calendar = self._project_calendar(calendar_meta)
+        if calendar.empty:
+            raise FeatureInputError("global calendar cannot be empty")
         yf = pd.concat([self._project_yfinance(item) for item in yf_meta], ignore_index=True)
+        calendar_dates = set(calendar["session_date"])
+        outside = ~yf["prediction_date"].isin(calendar_dates)
+        calendar_start = calendar["session_date"].min()
+        calendar_end = calendar["session_date"].max()
+        outside_bounds = outside & ~yf["prediction_date"].between(
+            calendar_start, calendar_end, inclusive="both"
+        )
+        if outside_bounds.any():
+            dates = sorted(
+                yf.loc[outside_bounds, "prediction_date"]
+                .dt.date.astype(str)
+                .unique()
+                .tolist()
+            )
+            raise FeatureInputError(
+                "provider row falls outside verified global calendar bounds: "
+                f"{dates}"
+            )
+        excluded_non_session_rows = yf.loc[
+            outside, ["observed_ticker", "prediction_date"]
+        ].copy()
+        excluded_non_session_rows["exclusion_reason"] = (
+            "YFINANCE_NON_SESSION_WITHIN_VERIFIED_CALENDAR_BOUNDS"
+        )
+        excluded_non_session_rows = excluded_non_session_rows.sort_values(
+            ["prediction_date", "observed_ticker"]
+        ).reset_index(drop=True)
+        yf = yf.loc[~outside].reset_index(drop=True)
+        if yf.empty:
+            raise FeatureInputError("no yFinance rows remain on verified global sessions")
         identity = self._project_identity(identity_meta)
         assembled = yf.merge(
             identity,
@@ -163,10 +197,6 @@ class FeatureInputAssembler:
         assembled = assembled.merge(
             benchmark, on="prediction_date", how="left", validate="many_to_one"
         )
-        calendar = self._project_calendar(calendar_meta)
-        outside = ~assembled["prediction_date"].isin(set(calendar["session_date"]))
-        if outside.any():
-            raise FeatureInputError("provider row falls outside the verified global calendar")
         result = assembled.loc[:, FEATURE_INPUT_COLUMNS].copy()
         if result.duplicated(["security_id", "prediction_date"]).any():
             raise FeatureInputError("duplicate security_id + prediction_date feature input")
@@ -175,12 +205,15 @@ class FeatureInputAssembler:
         mapping_version = str(parameters.get("ticker_mapping_version", "unknown"))
         mapping_checksum = str(parameters.get("ticker_mapping_checksum", "unknown"))
         return FeatureInputAssembly(
-            result.sort_values(["security_id", "prediction_date"]).reset_index(drop=True),
-            benchmark,
-            calendar,
-            tuple([*yf_meta, *is_meta, identity_meta, xu_meta, calendar_meta]),
-            mapping_version,
-            mapping_checksum,
+            frame=result.sort_values(["security_id", "prediction_date"]).reset_index(
+                drop=True
+            ),
+            benchmark=benchmark,
+            calendar=calendar,
+            excluded_non_session_rows=excluded_non_session_rows,
+            metadata=tuple([*yf_meta, *is_meta, identity_meta, xu_meta, calendar_meta]),
+            mapping_version=mapping_version,
+            mapping_checksum=mapping_checksum,
         )
 
     def _verify_many(

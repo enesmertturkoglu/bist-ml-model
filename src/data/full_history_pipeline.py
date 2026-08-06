@@ -32,6 +32,7 @@ from src.data.collectors import (
     PreparedTickerCollection,
     ProviderGap,
     SourceCollectionResult,
+    current_code_commit_sha,
 )
 from src.data.isyatirim_client import (
     CACHE_SCHEMA_VERSION,
@@ -507,7 +508,7 @@ class FullHistoryPipeline:
         self.paths = paths or FullHistoryPaths()
         self.snapshot_store = snapshot_store or SnapshotStore(self.config)
         self.collector = collector
-        self.code_commit_sha = code_commit_sha
+        self.code_commit_sha = code_commit_sha or current_code_commit_sha()
         self.monotonic_func = monotonic_func
         self.progress_func = progress_func
         self._checkpoint_attempt_history: tuple[ManifestOutcome, ...] = ()
@@ -1950,7 +1951,7 @@ class FullHistoryPipeline:
         identity_result = SecurityIdentityPipeline(
             self.config,
             snapshot_store=self.snapshot_store,
-            code_commit_sha=self.code_commit_sha or "unknown",
+            code_commit_sha=self.code_commit_sha,
         ).run(nominal_ids, preflight.mapping)
         identity = identity_result.frame
         if identity.duplicated(["security_id", "date"]).any():
@@ -1974,7 +1975,7 @@ class FullHistoryPipeline:
         cleaning_result = MarketDataCleaningPipeline(
             self.config,
             snapshot_store=self.snapshot_store,
-            code_commit_sha=self.code_commit_sha or "unknown",
+            code_commit_sha=self.code_commit_sha,
         ).run(
             definitions,
             price_steps,
@@ -1988,7 +1989,7 @@ class FullHistoryPipeline:
         label_result = LabelGenerationPipeline(
             self.config,
             snapshot_store=self.snapshot_store,
-            code_commit_sha=self.code_commit_sha or "unknown",
+            code_commit_sha=self.code_commit_sha,
         ).run(cleaning_result.snapshot.metadata.snapshot_id, price_steps)
         labels = label_result.frame
         if labels.duplicated(["security_id", "prediction_date"]).any():

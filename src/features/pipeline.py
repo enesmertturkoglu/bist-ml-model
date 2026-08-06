@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import Sequence
 
@@ -125,6 +126,10 @@ class BaselineFeaturePipeline:
         feature_config_checksum = self.config.feature.checksum(
             self.config.checksum_algorithm
         )
+        excluded_non_session_context = _excluded_non_session_context(
+            assembly.excluded_non_session_rows,
+            checksum_algorithm=self.config.checksum_algorithm,
+        )
         context = {
             "input_snapshot_ids": [item.snapshot_id for item in input_metadata],
             "input_content_checksums": checksum_by_id,
@@ -142,6 +147,7 @@ class BaselineFeaturePipeline:
             "feature_count": len(BASELINE_V1_FEATURES),
             "feature_names": list(BASELINE_V1_FEATURES),
             "quality_summary": quality.to_dict(orient="records"),
+            "excluded_non_session_provider_rows": excluded_non_session_context,
         }
         request = SnapshotRequest(
             source="features",
@@ -163,6 +169,35 @@ class BaselineFeaturePipeline:
         )
         written = self.snapshot_store.save_dataframe(output, request)
         return FeaturePipelineResult(written.metadata, output, quality)
+
+
+def _excluded_non_session_context(
+    frame: pd.DataFrame, *, checksum_algorithm: str
+) -> dict[str, object]:
+    """Return compact, deterministic audit metadata for non-session source rows."""
+
+    audit = frame.loc[
+        :, ["observed_ticker", "prediction_date", "exclusion_reason"]
+    ].copy()
+    audit["prediction_date"] = pd.to_datetime(
+        audit["prediction_date"], errors="raise"
+    ).dt.strftime("%Y-%m-%d")
+    audit = audit.sort_values(
+        ["prediction_date", "observed_ticker", "exclusion_reason"]
+    ).reset_index(drop=True)
+    payload = audit.to_csv(index=False, lineterminator="\n").encode("utf-8")
+    date_counts = {
+        str(key): int(value)
+        for key, value in audit["prediction_date"].value_counts().sort_index().items()
+    }
+    return {
+        "classification": "YFINANCE_NON_SESSION_WITHIN_VERIFIED_CALENDAR_BOUNDS",
+        "row_count": int(len(audit)),
+        "ticker_count": int(audit["observed_ticker"].nunique()),
+        "date_counts": date_counts,
+        "checksum_algorithm": checksum_algorithm,
+        "checksum": hashlib.new(checksum_algorithm, payload).hexdigest(),
+    }
 
 
 def _validate_feature_output(frame: pd.DataFrame) -> None:

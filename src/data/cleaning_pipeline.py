@@ -187,6 +187,9 @@ class MarketDataCleaningPipeline:
             all_metadata.append(identity_metadata)
         input_ids = tuple(item.snapshot_id for item in all_metadata)
         input_checksums = tuple(item.content_checksum for item in all_metadata)
+        input_checksum_by_id = {
+            item.snapshot_id: item.content_checksum for item in all_metadata
+        }
         tickers = sorted(value.definition.ticker.strip().upper() for value in verified)
         start = min(value.isyatirim.request_start_date for value in verified)
         end = max(value.isyatirim.request_end_date for value in verified)
@@ -206,6 +209,12 @@ class MarketDataCleaningPipeline:
                     "ticker_mapping_checksum"
                 ],
             }
+        cleaning_config_checksum = self.config.cleaning.checksum(
+            self.config.checksum_algorithm
+        )
+        price_step_table_checksum = price_steps.checksum(
+            self.config.checksum_algorithm
+        )
         request = SnapshotRequest(
             source="cleaning",
             dataset_type=self.config.cleaning.clean_dataset_type,
@@ -216,12 +225,8 @@ class MarketDataCleaningPipeline:
             request_end_date=end,
             request_parameters={
                 "cleaning_version": self.config.cleaning.cleaning_version,
-                "cleaning_config_checksum": self.config.cleaning.checksum(
-                    self.config.checksum_algorithm
-                ),
-                "price_step_table_checksum": price_steps.checksum(
-                    self.config.checksum_algorithm
-                ),
+                "cleaning_config_checksum": cleaning_config_checksum,
+                "price_step_table_checksum": price_step_table_checksum,
                 "tick_rule_set_ids": list(price_steps.rule_set_ids),
                 "official_source_documents": list(
                     price_steps.official_source_documents
@@ -240,6 +245,14 @@ class MarketDataCleaningPipeline:
                 if identity_metadata is not None
                 else ("ticker", "prediction_date")
             ),
+            revision_context={
+                "input_snapshot_ids": list(input_ids),
+                "input_content_checksums": input_checksum_by_id,
+                "cleaning_config_checksum": cleaning_config_checksum,
+                "price_step_table_checksum": price_step_table_checksum,
+                "code_commit_sha": self.code_commit_sha,
+                **identity_parameters,
+            },
         )
         written = self.snapshot_store.save_dataframe(cleaned, request)
         summary = summarize_cleaning(cleaned)

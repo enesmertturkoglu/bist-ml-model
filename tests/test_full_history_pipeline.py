@@ -167,6 +167,24 @@ def test_preflight_validates_snapshot_manifest_mapping_and_scope(tmp_path: Path)
     assert result.active_metadata.source == "universe"
 
 
+def test_pipeline_resolves_current_code_sha_when_not_explicitly_supplied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pipeline, _ = _fixture(tmp_path)
+    monkeypatch.setattr(
+        "src.data.full_history_pipeline.current_code_commit_sha", lambda: "f" * 40
+    )
+
+    resolved = FullHistoryPipeline(
+        pipeline.config,
+        context=pipeline.context,
+        paths=pipeline.paths,
+        snapshot_store=pipeline.snapshot_store,
+    )
+
+    assert resolved.code_commit_sha == "f" * 40
+
+
 def test_invalid_preflight_stops_before_provider_call(tmp_path: Path) -> None:
     pipeline, manifest_path = _fixture(tmp_path)
     manifest = pd.read_csv(manifest_path)
