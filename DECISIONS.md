@@ -981,6 +981,26 @@ Sabit yıllık İş Yatırım parçaları 621 security için binlerce gereksiz r
 
 2026-08-04
 
+### D038 — Derived Provenance ve Doğrulanmış Seans Normalizasyonu
+
+**Karar:**
+
+Security identity snapshot revision context'i doğrudan nominal input snapshot ID/checksum'larına, mapping sürüm/checksum'una ve üretim kodu commit SHA'sına bağlanır. Clean snapshot'ın tam batch lineage'ı snapshot metadata'sında korunur; her clean satırı yalnız kendi security'sine ait İş Yatırım raw, yFinance raw ve yFinance nominal snapshot ID/checksum üçlüsünü taşır. Aynı içerik ve aynı provenance bağlamı idempotenttir; input, mapping veya kod bağı değişirse eski snapshot değiştirilmeden yeni revision oluşur.
+
+D029 global BİST takviminin min/max sınırları içinde kalan fakat doğrulanmış oturum kümesinde bulunmayan yFinance provider satırları feature hesabından önce hariç tutulur. Hariç tutulan ticker+tarih kayıtları, tarih sayımları ve canonical checksum feature revision context'inde denetlenir. Global takvim sınırları dışındaki provider tarihleri sessizce kırpılmaz ve fail-closed hata üretir. Exact 32 `baseline_v1` feature allowlist'i, formülleri, label, model ve walk-forward kararları değişmez.
+
+**Gerekçe:**
+
+Tam batch lineage'ını yaklaşık bir milyon satırın her birine çoğaltmak gereksiz bellek büyümesi yaratıyordu. Satırın kendi kaynak bağı ile snapshot-geneli lineage'ı ayırmak denetlenebilirliği korurken belleği sınırlar. Doğrulanmış global takvim dışındaki provider gözlemlerini açık audit ile ayırmak, takvim birleşiminde kaybolmalarını önler ve veri kapsamını sessizce daraltmadan seans sözleşmesini uygular.
+
+**Etkilenen alanlar:**
+
+Security identity, clean ve feature snapshot provenance'ı; full-history derived bellek kullanımı; global takvim hizalaması ve kalite audit'i. D020, D024–D037 ile 32 feature/model/label/walk-forward kararları değiştirilmemiştir.
+
+**Tarih:**
+
+2026-08-07
+
 ## Henüz Kesinleşmemiş Kararlar
 
 - Likidite filtresi

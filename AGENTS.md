@@ -129,9 +129,9 @@ D034 exact `2026-07-29` aktif BİST master evreni 621 security ile dondurulmuşt
 
 PR #5 sonrasında resumable full-history orchestration ve fold feasibility altyapısı tamamlanmıştır. D035 iki turlu, security-geneli bütçeli collection; atomik security checkpoint'leri ve satır düzeyi cross-process resume kaydıyla uygulanmıştır. D036 geçerli boş İş Yatırım aralığını `NO_DATA_IN_RANGE` ve checksum'lı coverage cache olarak sınıflandırır; varsayılan üç security worker, process-geneli İş Yatırım concurrency `2`, tek-yazarlı coordinator ve manifest-sıralı deterministik commit kullanır. D037 cache dışı İş Yatırım dönemini önce tek tam-aralık request ile sorgular, yalnız gerçek transient hatada 12/6/3 aylık fallback'e geçer, worker slotlarını kayan kuyrukla doldurur ve row outcome checkpoint'ini compact v2 şemasıyla yazar.
 
-Son doğrulanmış regresyon sonucu `357 passed` olmuştur. İlk gerçek LightGBM performans deneyi henüz yapılmamıştır ve `EXPERIMENT_LOG.md` oluşturulmamıştır.
+Production collection iki turu tamamlamıştır: `621 attempted / 615 complete / 2 partial / 0 failed / 4 no-history / 0 unattempted`. Kalan `PARTIAL` securities `LYDHO` ve `LRSHO`; `NO_HISTORY` securities `SKYLP`, `MHRGY`, `MIATK` ve `AZTEK`tir. Derived zincire yalnız fiziksel checksum doğrulamasından geçen 615 `COMPLETE` security alınmıştır.
 
-Son tutarlı production checkpoint'i `166 attempted / 141 complete / 21 partial / 4 no-history / 455 unattempted` durumundadır. Derived zincir başlamamış ve `experiment_ready=false` kalmıştır. Sıradaki teknik görev `PENGD` satırından collection koşusunu sürdürmek, 621 security'nin tamamını denemek ve ardından derived kalite/fold feasibility zincirini üretmektir.
+Identity, clean, label, global takvim, doğrulanmış XU100 ve exact 32-feature snapshot zinciri üretilmiş ve fiziksel checksum doğrulamasından geçmiştir. Fold feasibility raporu LightGBM çalıştırmadan `2021-07-16` için 62 tam fold göstermiştir. Son doğrulanmış regresyon sonucu `361 passed` olmuştur. Kapsam 621'den küçük olduğu için `experiment_ready=false` kalır; ilk gerçek LightGBM performans deneyi yapılmamış ve `EXPERIMENT_LOG.md` oluşturulmamıştır. Sıradaki teknik görev iki `PARTIAL` security'nin provider/mapping boşluklarını incelemek ve ilk gerçek test tarihini ayrı kararla kesinleştirmektir.
 
 Açık kararlar:
 

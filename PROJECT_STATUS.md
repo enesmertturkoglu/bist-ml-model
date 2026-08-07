@@ -216,6 +216,17 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 - MOPAS eski production davranışı `134 request / 106 retry / 1204.540 saniye` idi. Yeni 12-security koşusunda MOPAS `2 request / 0 retry / COMPLETE`; ayrı tekrar ölçümünde geçici yFinance hatası nedeniyle `3 request / 1 retry / 34.882 saniye` oldu. Her iki yeni gözlem de eski request patlamasını ortadan kaldırdı.
 - Tam regresyon `357 passed`; `compileall`, `pip check` ve `git diff --check` başarılıdır. LightGBM çağrılmadı, 32 feature/model/walk-forward kararları değişmedi ve `EXPERIMENT_LOG.md` oluşturulmadı.
 
+## Production Collection ve Derived Zincir Tamamlanması — 2026-08-07
+
+- Production collection iki turu tamamlandı: `621 attempted / 615 complete / 2 partial / 0 failed / 4 no-history / 0 unattempted`. Retry pass `23` security denedi, `21` tanesini COMPLETE'e iyileştirdi; `LYDHO` ve `LRSHO` PARTIAL kaldı. `SKYLP`, `MHRGY`, `MIATK` ve `AZTEK` NO_HISTORY'dir.
+- Yeniden başlatma sonrası son güvenli resume, 621 first-pass ve 23 retry-pass sonucu için yalnız checkpoint hit kullandı; provider request üretmedi, üçüncü pass başlatmadı ve immutable collection snapshot'larını değiştirmedi.
+- Full-history clean satır provenance'ında yaklaşık 1.846 snapshot ID/checksum'unu her satıra çoğaltan bellek kök nedeni kaldırıldı. Satır yalnız kendi security'sinin İş Yatırım raw, yFinance raw ve yFinance nominal kaynak üçlüsünü taşır; tam batch lineage snapshot metadata'sında korunur.
+- Identity revision context'i nominal input ID/checksum'ları, mapping sürüm/checksum'u ve kod SHA'sına bağlandı. D029 global takvim sınırları içinde bulunup doğrulanmış oturum olmayan 2.340 yFinance satırı, 601 ticker ve sekiz tarih için feature öncesinde fail-closed audit ile hariç tutuldu; takvim sınırları dışındaki tarihler hata olmaya devam eder. Exact 32 feature/formül değişmedi.
+- Son derived zincir fiziksel checksum doğrulamasından geçti: identity `snap_c0c81f5da7b0a959_r0002_9ced4c104dbb` (`787847` satır), clean `snap_90b6cf6ffaa99fba_r0001_b09d98d4fd9c` (`977235`), label `snap_3123491b6aa4b16e_r0001_4f0b4521c4f0` (`977235`), global takvim `snap_2e2d591483fcc305_r0003_ff04683e4e66` (`1592`), XU100 `snap_6b9b59ec1c0d3120_r0003_c536c24925d5` (`1592`) ve feature `snap_7f0824bf77c9c7ce_r0002_89b9c111be78` (`785507`).
+- Label dağılımı `755050 LABELED / 222185 NA`, pozitif `258371`, negatif `496679` ve pozitif oranı `0.3421905834` oldu. Fold feasibility, LightGBM çalıştırmadan ilk test tarihi için `2021-07-16` önerisini ve `62` tam fold'u raporladı.
+- Derived zincire yalnız 615 fiziksel doğrulanmış COMPLETE security girdi; 6 security fail-closed dışlandığı için koşu `PARTIAL`, `experiment_ready=false`, `lightgbm_training_run=false` ve `experiment_log_created=false` kaldı. `EXPERIMENT_LOG.md` oluşturulmadı.
+- Tam regresyon `361 passed`; `compileall`, `pip check`, `git diff --check` başarılıdır.
+
 ## Kesinleşen Başlangıç Senaryosu
 
 - Tahmin zamanı: `T` günü piyasa kapandıktan sonra
@@ -262,12 +273,11 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Görevler
 
-1. `python -u scripts/run_full_history_pipeline.py --security-workers 3 --isyatirim-max-concurrency 2` komutuyla production collection'ı 166/621 checkpoint'inden ve PENGD satırından sürdür.
-2. 621 security'nin tamamını D035–D037 kontrollü collection akışıyla dene; doğrulanmış COMPLETE snapshot/cache kapsamını yeniden fetch etme.
-3. Collection tamamlandıktan sonra identity, clean, label, XU100, exact 32 `baseline_v1`, prediction universe ve veri-kalitesi raporlarını üret.
-4. Fold feasibility sonuçlarını LightGBM eğitmeden incele.
-5. İlk gerçek 20 oturumluk test başlangıç tarihini ayrı kararla kesinleştir.
-6. Bundan sonra `EXPERIMENT_LOG.md` oluşturup ilk gerçek LightGBM walk-forward deneyini çalıştır.
+1. `LYDHO` ve `LRSHO` için kalan provider/tarih boşluklarını ve olası resmî mapping kanıtını incele; otomatik alias üretme.
+2. Dört `NO_HISTORY` security için mevcut coverage/provenance kaydını koru; resmî kanıt olmadan veri uydurma veya silent fallback yapma.
+3. Fold feasibility raporundaki `2021-07-16` önerisini inceleyip ilk gerçek 20 oturumluk test başlangıç tarihini ayrı kararla kesinleştir.
+4. Tam kapsam elde edilmeden veya açık kapsam kararı verilmeden `experiment_ready=true` yapma.
+5. Uygun karar sonrasında `EXPERIMENT_LOG.md` oluşturup ilk gerçek LightGBM walk-forward deneyini çalıştır.
 
 ## Tamamlanan Ana Aşamalar
 
@@ -285,8 +295,8 @@ D022/D023 modüler piyasa verisi temizleme ve işlem uygunluğu, D026 resmî fiy
 
 ## Sıradaki Ana Aşamalar
 
-- Checkpoint'ten resumable `2020-03-13` sonrası tam tarihsel snapshot zinciri
-- Fold feasibility ve ilk gerçek test tarihi kararı
+- İki PARTIAL security için provider/mapping incelemesi
+- İlk gerçek test tarihi kararı
 - İlk gerçek LightGBM walk-forward deneyi
 - Backtest
 - Kontrollü deneyler

@@ -8,7 +8,7 @@ BİST hisselerini, T+1 açılışından sonraki üç BİST işlem günü içinde
 
 Veri toplama ve değişmez snapshot, temizleme ve uygunluk, üç işlem günlük label, security identity/tarih-etkin ticker mapping, doğrulanmış XU100, global BİST takvimi, tam 32 `baseline_v1` feature pipeline'ı ve leakage-safe LightGBM expanding walk-forward eğitim/artifact altyapısı tamamlandı. Resmî kaynaklı `bist_active_universe_v1`, `2026-07-29` as-of tarihinde 621 security ile donduruldu. İlk gerçek model deneyi henüz çalıştırılmadı.
 
-`scripts/run_full_history_pipeline.py` iki turlu, security-geneli süre bütçeli, empty-range cache'li ve tek-yazarlı atomik checkpoint kullanan resumable orchestration olarak hazırdır. HTTP 200 `{"value":[]}` `NO_DATA_IN_RANGE` olur ve retry/split üretmez. İş Yatırım cache dışı dönemi önce tek tam-aralık request ile sorgular; yalnız gerçek transient hata sürerse 12/6/3 aylık fallback'e geçer. Varsayılan üç kayan security worker process-geneli en fazla iki eşzamanlı İş Yatırım request'i kullanır; coordinator manifest sırasında commit eder. Son tutarlı production checkpoint'i 166/621 security'nin denendiğini gösterir: 141 COMPLETE, 21 PARTIAL, 4 NO_HISTORY ve 455 UNATTEMPTED. Sıradaki security PENGD'dir. Koşuyu checksum doğrulamalı snapshot/cache reuse ile sürdürmek için:
+`scripts/run_full_history_pipeline.py` iki turlu, security-geneli süre bütçeli, empty-range cache'li ve tek-yazarlı atomik checkpoint kullanan resumable orchestration olarak hazırdır. HTTP 200 `{"value":[]}` `NO_DATA_IN_RANGE` olur ve retry/split üretmez. İş Yatırım cache dışı dönemi önce tek tam-aralık request ile sorgular; yalnız gerçek transient hata sürerse 12/6/3 aylık fallback'e geçer. Varsayılan üç kayan security worker process-geneli en fazla iki eşzamanlı İş Yatırım request'i kullanır; coordinator manifest sırasında commit eder. Production iki turu tamamlamıştır: 621/621 security denendi; 615 COMPLETE, 2 PARTIAL, 4 NO_HISTORY ve 0 UNATTEMPTED. Aynı komut, doğrulanmış snapshot/cache kapsamını provider'a yeniden sormadan derived zinciri güvenle yeniden üretmek için kullanılabilir:
 
 ```powershell
 python -u scripts/run_full_history_pipeline.py `
@@ -18,7 +18,7 @@ python -u scripts/run_full_history_pipeline.py `
 
 Tek worker güvenli fallback'i `--security-workers 1` seçeneğidir. `--refresh` yalnız bilinçli yeniden sorgulama için kullanılır; normal resume komutunda verilmez.
 
-Collection'ın iki turu bitmeden derived zincir tamamlanmış deney verisi sayılmaz, `experiment_ready=true` olamaz ve gerçek LightGBM performans deneyine geçilmez.
+Derived identity/clean/label/takvim/XU100/exact-32-feature zinciri 615 COMPLETE security ile üretildi ve fiziksel checksum doğrulamasından geçti. İki PARTIAL ile dört NO_HISTORY fail-closed dışlandığı için `experiment_ready=false` kalır ve gerçek LightGBM performans deneyine henüz geçilmez.
 
 ## Veri akışı
 
@@ -64,6 +64,6 @@ python scripts/build_history_collection_manifest.py --active-universe-snapshot-i
 
 ## Sıradaki aşama
 
-- Production collection'ı 43/621 checkpoint'inden sürdürüp bütün security'leri denemek
-- `2020-03-13` sonrası tam derived snapshot ve veri-kalitesi zincirini üretmek
-- Sınıf dağılımı/fold feasibility raporundan sonra ilk gerçek test tarihini ayrı kararla kesinleştirmek
+- LYDHO ve LRSHO için kalan provider/mapping boşluklarını incelemek
+- Fold feasibility raporundaki `2021-07-16` önerisini değerlendirip ilk gerçek test tarihini ayrı kararla kesinleştirmek
+- Ancak tam kapsam veya açık kullanıcı kararı sonrasında ilk gerçek LightGBM walk-forward deneyine geçmek

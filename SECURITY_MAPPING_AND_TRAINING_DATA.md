@@ -122,6 +122,10 @@ python scripts/run_full_history_pipeline.py --preflight-only
 
 Üretim komutu security düzeyinde kontrollü paraleldir; İş Yatırım process-geneli concurrency sınırı `2`dir ve sessiz veri kaynağı fallback'i yoktur. First pass bütün securities için bitmeden retry pass başlamaz; aynı security aynı pass içinde iki worker'a verilmez ve üçüncü otomatik pass yoktur. İki tur bitmeden derived zincir başlamaz ve bitmiş collection'da bütün 621 securities `COMPLETE/PARTIAL/FAILED/NO_HISTORY` sınıflarından birindedir. Derived zincire yalnız checksum doğrulamasından geçen `COMPLETE` securities girer; kapsam 621'den küçükse `experiment_ready=false` kalır.
 
+Production iki turu `621 attempted / 615 COMPLETE / 2 PARTIAL / 4 NO_HISTORY / 0 UNATTEMPTED` durumuyla tamamlamıştır. `LYDHO` ve `LRSHO` PARTIAL; `SKYLP`, `MHRGY`, `MIATK` ve `AZTEK` NO_HISTORY kalmıştır. Derived zincir yalnız fiziksel checksum doğrulamasından geçen 615 COMPLETE security ile üretilmiş; bu alt kapsam nedeniyle `experiment_ready=false` tutulmuştur.
+
+Identity revision context'i doğrudan nominal input snapshot ID/checksum'larına, mapping sürüm/checksum'una ve üretim kodu commit SHA'sına bağlıdır. Aynı içerik ve bağlam idempotenttir; input, mapping veya kod bağı değişirse eski snapshot değiştirilmeden yeni revision oluşur. Clean satırlarında yalnız ilgili security'nin İş Yatırım raw, yFinance raw ve yFinance nominal snapshot bağı taşınır; 621-security batch'inin tam lineage'ı satırlara çoğaltılmadan snapshot metadata'sında korunur.
+
 Tam collection tamamlanmadan identity/clean/label/XU100/feature/prediction/fold raporları tam sayılmaz. `ticker_mapping_review.csv` sinyalleri otomatik alias değildir; `NO_HISTORICAL_TICKER_FOUND` da “ticker hiç değişmedi” doğrulaması değildir. Açıklanamayan boşluklar için KAP/Borsa İstanbul kanıtı ayrı incelenir.
 
 `scripts/report_fold_feasibility.py`, gerektiğinde dışa aktarılmış auditable training panel ve global takvim CSV'sinden yalnız feasibility raporunu yeniden üretir; LightGBM çağırmaz:

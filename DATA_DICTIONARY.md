@@ -419,10 +419,14 @@ Feature metadata/provenance alanları:
 | `global_calendar_snapshot_id` / `global_calendar_checksum` | Exact oturum ızgarası bağı |
 | `xu100_snapshot_id` / `xu100_checksum` | Doğrulanmış benchmark bağı |
 | `ticker_mapping_version` / `ticker_mapping_checksum` | Tarih-etkin security kimlik bağı |
+| `excluded_non_session_provider_rows` | Takvim min/max sınırları içinde olup doğrulanmış global BİST oturumu olmayan yFinance satırlarının toplamı |
+| `excluded_non_session_provider_ticker_count` | Bu audit sınıfından etkilenen tekil provider ticker sayısı |
+| `excluded_non_session_provider_date_counts` | Hariç tutulan satırların tarih bazında deterministik sayımları |
+| `excluded_non_session_provider_audit_checksum` | Canonical ticker+tarih audit kaydının SHA-256 özeti |
 | `revision_context_checksum` | İçerikten bağımsız provenance revizyon kimliği |
 | `quality_summary` | Her feature için `valid`, `missing`, `warmup`, `source_missing`, `invalid_math`, `xu100_missing`, `cross_section_insufficient`, `infinite_replaced` sayıları |
 
-Per-row 32 ayrı missing-reason sütunu üretilmez. `NaN` imputasyon yapılmadan korunur; sonsuz sonuçlar `NaN` yapılır ve kalite özetinde sayılır.
+Per-row 32 ayrı missing-reason sütunu üretilmez. `NaN` imputasyon yapılmadan korunur; sonsuz sonuçlar `NaN` yapılır ve kalite özetinde sayılır. D029 global takvim sınırları içindeki fakat doğrulanmış oturum kümesinde bulunmayan provider satırları feature hesabından önce hariç tutulup yukarıdaki provenance alanlarıyla denetlenir. Takvim min/max sınırları dışındaki provider tarihi sessizce kırpılmaz; fail-closed hatadır. Bu işlem feature allowlist'ini veya 32 feature formülünü değiştirmez.
 
 ## D034 Aktif BİST Pay Evreni Alanları
 
